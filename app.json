@@ -1,15 +1,19 @@
 {
   "expo": {
-    "name": "halo-app",
-    "slug": "halo-app",
+    "name": "Halo",
+    "slug": "halo",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "haloapp",
+    "scheme": "halo",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kelbidani.halo",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -43,6 +47,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "95e6ed74-379a-4581-b30b-2ccb41f6f46e"
+      }
     }
   }
 }
