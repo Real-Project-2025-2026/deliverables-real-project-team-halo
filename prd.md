@@ -95,7 +95,9 @@ The goal is not surveillance, but empowerment — giving users control, connecti
 ---
 
 ## 8. Design & Tone
-- **Primary color:** #5170FF  
+- **Primary color:** #
+
+0FF  
 - **Accent:** white, light gray  
 - **Typography:** rounded sans-serif  
 - **Tone:** calm, trustworthy, empathetic  
