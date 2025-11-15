@@ -1,98 +1,362 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { MapViewWrapper } from '@/components/map-view-wrapper';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useLocation } from '@/hooks/use-location';
+import { useTrip } from '@/hooks/use-trip';
+import { useAuth } from '@/providers/auth-provider';
+import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
+import { router } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const { user, profile } = useAuth();
+  const { activeTrip } = useTrip();
+  const { location, getCurrentLocation, requestPermission, startWatchingLocation, stopWatchingLocation } = useLocation();
+  const bottomSheetRef = useRef<BottomSheet>(null);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  // Bottom sheet snap points
+  const snapPoints = useMemo(() => ['25%', '50%', '85%'], []);
+
+  // Request location on mount and start watching
+  useEffect(() => {
+    const initLocation = async () => {
+      const hasPermission = await requestPermission();
+      if (hasPermission) {
+        // Get initial location
+        await getCurrentLocation();
+        
+        // Start watching location for continuous updates
+        startWatchingLocation((newLocation) => {
+          // Location will be updated automatically via useLocation hook
+          console.log('Location updated:', newLocation.coords);
+        });
+      }
+    };
+    initLocation();
+    
+    // Cleanup on unmount
+    return () => {
+      stopWatchingLocation();
+    };
+  }, []);
+
+  function handleStartTrip() {
+    if (activeTrip) {
+      // Navigate to active trip screen
+      router.push('/trip/active');
+    } else {
+      // Navigate to start trip screen
+      router.push('/trip/start');
+    }
+  }
+
+  const handleSheetChanges = useCallback((index: number) => {
+    console.log('handleSheetChanges', index);
+  }, []);
+
+  const handleLocationButtonPress = useCallback(async () => {
+    console.log('Location button pressed, requesting location...');
+    const hasPermission = await requestPermission();
+    console.log('Permission granted:', hasPermission);
+    
+    if (hasPermission) {
+      // Get fresh location with high accuracy
+      const currentLocation = await getCurrentLocation();
+      if (currentLocation && currentLocation.coords) {
+        const { latitude, longitude, accuracy } = currentLocation.coords;
+        console.log('Location updated via button:', {
+          latitude,
+          longitude,
+          accuracy,
+        });
+        
+        // Validate coordinates
+        if (latitude && longitude && 
+            !isNaN(latitude) && !isNaN(longitude) &&
+            latitude !== 0 && longitude !== 0 &&
+            latitude >= -90 && latitude <= 90 &&
+            longitude >= -180 && longitude <= 180) {
+          console.log('Valid location received, map should update');
+        } else {
+          console.error('Invalid location coordinates:', { latitude, longitude });
+        }
+      } else {
+        console.warn('Failed to get current location or location is null');
+      }
+    } else {
+      console.warn('Location permission denied');
+    }
+  }, [requestPermission, getCurrentLocation]);
+
+  return (
+    <GestureHandlerRootView style={styles.container}>
+      {/* Map Background */}
+      <MapViewWrapper
+        userLocation={
+          location && location.coords
+            ? {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+              }
+            : undefined
+        }
+        onLocationButtonPress={handleLocationButtonPress}
+      />
+
+      {/* Bottom Sheet */}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={1}
+        snapPoints={snapPoints}
+        onChange={handleSheetChanges}
+        enablePanDownToClose={false}
+        backgroundStyle={styles.bottomSheetBackground}
+        handleIndicatorStyle={styles.handleIndicator}>
+        <BottomSheetView style={styles.contentContainer}>
+          {/* Header */}
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.greeting}>
+                Hi, {profile?.full_name || user?.email?.split('@')[0] || 'there'}
+              </Text>
+              <Text style={styles.subtitle}>Stay safe on your journey</Text>
+            </View>
+          </View>
+
+          {/* Main Action Card */}
+          {activeTrip ? (
+            <TouchableOpacity style={styles.activeTripCard} onPress={handleStartTrip}>
+              <View style={styles.activeTripHeader}>
+                <View style={styles.statusBadge}>
+                  <View style={styles.statusDot} />
+                  <Text style={styles.statusText}>Trip Active</Text>
+                </View>
+                <IconSymbol name="chevron.right" size={20} color="#fff" />
+              </View>
+              <Text style={styles.activeTripTitle}>Your trip is in progress</Text>
+              <Text style={styles.activeTripSubtitle}>Tap to view details</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.startCard} onPress={handleStartTrip}>
+              <View style={styles.startIconContainer}>
+                <IconSymbol name="shield.fill" size={40} color="#5170FF" />
+              </View>
+              <View style={styles.startContent}>
+                <Text style={styles.startTitle}>Start a Trip</Text>
+                <Text style={styles.startSubtitle}>
+                  Activate safety monitoring
+                </Text>
+              </View>
+              <IconSymbol name="chevron.right" size={24} color="#fff" />
+            </TouchableOpacity>
+          )}
+
+          {/* Features Grid */}
+          <View style={styles.featuresGrid}>
+            <View style={styles.featureCard}>
+              <View style={styles.featureIcon}>
+                <IconSymbol name="bell.fill" size={20} color="#fff" />
+              </View>
+              <Text style={styles.featureTitle}>Check-ins</Text>
+            </View>
+
+            <View style={styles.featureCard}>
+              <View style={styles.featureIcon}>
+                <IconSymbol name="location.fill" size={20} color="#fff" />
+              </View>
+              <Text style={styles.featureTitle}>Tracking</Text>
+            </View>
+
+            <View style={styles.featureCard}>
+              <View style={styles.featureIcon}>
+                <IconSymbol name="person.2.fill" size={20} color="#fff" />
+              </View>
+              <Text style={styles.featureTitle}>Together</Text>
+            </View>
+
+            <View style={styles.featureCard}>
+              <View style={styles.featureIcon}>
+                <IconSymbol name="phone.fill" size={20} color="#fff" />
+              </View>
+              <Text style={styles.featureTitle}>Emergency</Text>
+            </View>
+          </View>
+
+          {/* Info Card */}
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitle}>🛡️ How Halo Works</Text>
+            <Text style={styles.infoText}>
+              Start a trip → Choose safety mode → Receive check-ins → Arrive safely
+            </Text>
+          </View>
+        </BottomSheetView>
+      </BottomSheet>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+  },
+  bottomSheetBackground: {
+    backgroundColor: '#5170FF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  handleIndicator: {
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    width: 40,
+  },
+  contentContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  header: {
+    marginBottom: 24,
+  },
+  greeting: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.9,
+  },
+  startCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    padding: 20,
+    borderRadius: 16,
+    marginBottom: 24,
+    borderWidth: 2,
+    borderColor: '#fff',
   },
-  stepContainer: {
-    gap: 8,
+  startIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  startContent: {
+    flex: 1,
+  },
+  startTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  startSubtitle: {
+    fontSize: 13,
+    color: '#fff',
+    opacity: 0.9,
+  },
+  activeTripCard: {
+    backgroundColor: '#5170FF',
+    padding: 20,
+    borderRadius: 16,
+    marginBottom: 24,
+  },
+  activeTripHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#4CAF50',
+    marginRight: 6,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  activeTripTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  activeTripSubtitle: {
+    fontSize: 13,
+    color: '#fff',
+    opacity: 0.8,
+  },
+  featuresGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 24,
+  },
+  featureCard: {
+    flex: 1,
+    minWidth: '47%',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  featureIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  featureTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  infoCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#fff',
+    opacity: 0.9,
+    lineHeight: 20,
   },
 });

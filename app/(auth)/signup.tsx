@@ -1,28 +1,36 @@
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/providers/auth-provider';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Link, router } from 'expo-router';
 import { useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  ScrollView,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Link, router } from 'expo-router';
-import { useAuth } from '@/providers/auth-provider';
 
 export default function SignupScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { signUp } = useAuth();
 
   async function handleSignup() {
+    if (!fullName.trim()) {
+      Alert.alert('Error', 'Please enter your name');
+      return;
+    }
+
     if (!email || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
@@ -41,11 +49,26 @@ export default function SignupScreen() {
     setIsLoading(true);
     try {
       await signUp(email, password);
-      Alert.alert(
-        'Success',
-        'Account created! Please check your email to verify your account.',
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
-      );
+      
+      // Get the newly created user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user && fullName) {
+        // Update profile with name
+        await supabase
+          .from('profiles')
+          .update({
+            full_name: fullName.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+
+        // Store name for onboarding
+        await AsyncStorage.setItem('@halo_onboarding_name', fullName.trim());
+      }
+
+      // Go to onboarding instead of login
+      router.replace('/onboarding');
     } catch (error: any) {
       Alert.alert('Signup Failed', error.message || 'An error occurred');
     } finally {
@@ -70,8 +93,19 @@ export default function SignupScreen() {
             <View style={styles.form}>
               <TextInput
                 style={styles.input}
+                placeholder="Your Name"
+                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                value={fullName}
+                onChangeText={setFullName}
+                autoCapitalize="words"
+                autoCorrect={false}
+                editable={!isLoading}
+              />
+
+              <TextInput
+                style={styles.input}
                 placeholder="Email"
-                placeholderTextColor="#999"
+                placeholderTextColor="rgba(255, 255, 255, 0.5)"
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
@@ -83,7 +117,7 @@ export default function SignupScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Password (min. 6 characters)"
-                placeholderTextColor="#999"
+                placeholderTextColor="rgba(255, 255, 255, 0.5)"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
@@ -95,7 +129,7 @@ export default function SignupScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Confirm Password"
-                placeholderTextColor="#999"
+                placeholderTextColor="rgba(255, 255, 255, 0.5)"
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 secureTextEntry
@@ -139,7 +173,7 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#5170FF',
   },
   keyboardView: {
     flex: 1,
@@ -159,28 +193,29 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#5170FF',
+    color: '#fff',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   form: {
     gap: 16,
   },
   input: {
     height: 56,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderWidth: 2,
+    borderColor: '#fff',
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
-    backgroundColor: '#F9F9F9',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    color: '#fff',
   },
   button: {
     height: 56,
-    backgroundColor: '#5170FF',
+    backgroundColor: '#fff',
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -190,7 +225,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
+    color: '#5170FF',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -202,16 +237,17 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 14,
-    color: '#666',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   link: {
     fontSize: 14,
-    color: '#5170FF',
+    color: '#fff',
     fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   disclaimer: {
     fontSize: 12,
-    color: '#999',
+    color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'center',
     marginTop: 8,
   },

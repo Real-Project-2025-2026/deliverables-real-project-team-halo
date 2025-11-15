@@ -72,7 +72,10 @@ export function useLocation(): UseLocationReturn {
       }
 
       const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+        accuracy: Location.Accuracy.High,
+        timeInterval: 5000,
+        distanceInterval: 1,
+        mayShowUserSettingsDialog: true,
       });
 
       setLocation(currentLocation);

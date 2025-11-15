@@ -34,7 +34,7 @@ export default function SettingsScreen() {
           <View style={styles.card}>
             <View style={styles.row}>
               <View style={styles.iconContainer}>
-                <IconSymbol name="person.fill" size={20} color="#5170FF" />
+                <IconSymbol name="person.fill" size={20} color="#fff" />
               </View>
               <View style={styles.info}>
                 <Text style={styles.label}>Email</Text>
@@ -44,7 +44,7 @@ export default function SettingsScreen() {
             {profile?.full_name && (
               <View style={styles.row}>
                 <View style={styles.iconContainer}>
-                  <IconSymbol name="person.circle" size={20} color="#5170FF" />
+                  <IconSymbol name="person.circle" size={20} color="#fff" />
                 </View>
                 <View style={styles.info}>
                   <Text style={styles.label}>Name</Text>
@@ -61,7 +61,7 @@ export default function SettingsScreen() {
           <View style={styles.card}>
             <View style={styles.row}>
               <View style={styles.iconContainer}>
-                <IconSymbol name="timer" size={20} color="#5170FF" />
+                <IconSymbol name="timer" size={20} color="#fff" />
               </View>
               <View style={styles.info}>
                 <Text style={styles.label}>Default Check-in Interval</Text>
@@ -72,7 +72,7 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.row}>
               <View style={styles.iconContainer}>
-                <IconSymbol name="shield.fill" size={20} color="#5170FF" />
+                <IconSymbol name="shield.fill" size={20} color="#fff" />
               </View>
               <View style={styles.info}>
                 <Text style={styles.label}>Default Trip Mode</Text>
@@ -83,7 +83,7 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.row}>
               <View style={styles.iconContainer}>
-                <IconSymbol name="person.2.fill" size={20} color="#5170FF" />
+                <IconSymbol name="person.2.fill" size={20} color="#fff" />
               </View>
               <View style={styles.info}>
                 <Text style={styles.label}>SafeTogether</Text>
@@ -101,7 +101,7 @@ export default function SettingsScreen() {
           <View style={styles.card}>
             <View style={styles.row}>
               <View style={styles.iconContainer}>
-                <IconSymbol name="clock" size={20} color="#5170FF" />
+                <IconSymbol name="clock" size={20} color="#fff" />
               </View>
               <View style={styles.info}>
                 <Text style={styles.label}>Data Retention</Text>
@@ -115,7 +115,7 @@ export default function SettingsScreen() {
 
         {/* Sign Out Button */}
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-          <IconSymbol name="arrow.right.square" size={20} color="#FF3B30" />
+          <IconSymbol name="arrow.right.square" size={20} color="#fff" />
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
@@ -126,7 +126,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9F9F9',
+    backgroundColor: '#5170FF',
   },
   header: {
     padding: 24,
@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#5170FF',
+    color: '#fff',
   },
   content: {
     flex: 1,
@@ -147,16 +147,19 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: '#fff',
+    opacity: 0.9,
     marginBottom: 12,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     borderRadius: 12,
     padding: 16,
     gap: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   row: {
     flexDirection: 'row',
@@ -166,7 +169,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F0F3FF',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -176,19 +179,20 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    color: '#666',
+    color: '#fff',
+    opacity: 0.8,
     marginBottom: 4,
   },
   value: {
     fontSize: 16,
-    color: '#000',
+    color: '#fff',
     fontWeight: '500',
   },
   signOutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255, 59, 48, 0.2)',
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
@@ -198,7 +202,7 @@ const styles = StyleSheet.create({
   signOutText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FF3B30',
+    color: '#fff',
   },
 });
 

@@ -1,18 +1,19 @@
+import { useAuth } from '@/providers/auth-provider';
+import { Link, router } from 'expo-router';
 import { useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Link, router } from 'expo-router';
-import { useAuth } from '@/providers/auth-provider';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -44,15 +45,23 @@ export default function LoginScreen() {
         style={styles.keyboardView}>
         <View style={styles.content}>
           <View style={styles.header}>
-            <Text style={styles.title}>Welcome to Halo</Text>
+            <Text style={styles.title}>Welcome to Halo!</Text>
             <Text style={styles.subtitle}>Your digital guardian</Text>
+          </View>
+
+          <View style={styles.imageContainer}>
+            <Image
+              source={require('@/assets/images/halo-angel.png')}
+              style={styles.angelImage}
+              resizeMode="contain"
+            />
           </View>
 
           <View style={styles.form}>
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor="#999"
+              placeholderTextColor="rgba(255, 255, 255, 0.5)"
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
@@ -64,7 +73,7 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="Password"
-              placeholderTextColor="#999"
+              placeholderTextColor="rgba(255, 255, 255, 0.5)"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -102,7 +111,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#5170FF',
   },
   keyboardView: {
     flex: 1,
@@ -113,34 +122,43 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   header: {
-    marginBottom: 48,
+    marginBottom: 24,
     alignItems: 'center',
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#5170FF',
+    color: '#fff',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  imageContainer: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  angelImage: {
+    width: 140,
+    height: 140,
   },
   form: {
     gap: 16,
   },
   input: {
     height: 56,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderWidth: 2,
+    borderColor: '#fff',
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
-    backgroundColor: '#F9F9F9',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    color: '#fff',
   },
   button: {
     height: 56,
-    backgroundColor: '#5170FF',
+    backgroundColor: '#fff',
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -150,7 +168,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
+    color: '#5170FF',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -162,12 +180,13 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 14,
-    color: '#666',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   link: {
     fontSize: 14,
-    color: '#5170FF',
+    color: '#fff',
     fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
 
