@@ -56,7 +56,7 @@ export default function StartTripScreen() {
         return;
       }
 
-      const { success, trip } = await startTrip({
+      const { success, trip, error } = await startTrip({
         mode: selectedMode,
         checkinIntervalMinutes: checkinInterval,
         safetogetherEnabled,
@@ -66,7 +66,9 @@ export default function StartTripScreen() {
       });
 
       if (!success || !trip) {
-        Alert.alert('Error', 'Failed to start trip. Please try again.');
+        const errorMessage = error || 'Failed to start trip. Please try again.';
+        Alert.alert('Error', errorMessage);
+        console.error('Trip start error:', error);
         return;
       }
 

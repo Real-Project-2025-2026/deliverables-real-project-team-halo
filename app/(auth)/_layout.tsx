@@ -9,6 +9,9 @@ export default function AuthLayout() {
       }}>
       <Stack.Screen name="login" />
       <Stack.Screen name="signup" />
+      <Stack.Screen name="email-confirmation" />
+      <Stack.Screen name="onboarding-name" />
+      <Stack.Screen name="onboarding-username" />
     </Stack>
   );
 }

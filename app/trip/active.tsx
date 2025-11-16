@@ -5,7 +5,12 @@ import { useCheckinTimer } from '@/hooks/use-checkin-timer';
 import { useLocation } from '@/hooks/use-location';
 import { useTrip } from '@/hooks/use-trip';
 import { stopBackgroundLocationTracking } from '@/services/background-location';
-import { sendCheckinNotification } from '@/services/notification-service';
+import {
+  sendCheckinNotification,
+  sendEscalationNotification,
+} from '@/services/notification-service';
+import * as routeService from '@/services/route-service';
+import * as tripService from '@/services/trip-service';
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -36,16 +41,23 @@ function formatDurationWithSeconds(totalSeconds: number): string {
  * - Simple completion flow
  */
 export default function ActiveTripScreen() {
-  const { activeTrip, completeTrip, isLoading, updateLocation } = useTrip();
+  const { activeTrip, completeTrip, isLoading, updateLocation, refreshActiveTrip } = useTrip();
   const { location, startWatchingLocation, stopWatchingLocation } = useLocation();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [checkinModalVisible, setCheckinModalVisible] = useState(false);
+  const [isEscalating, setIsEscalating] = useState(false);
+  const [routePoints, setRoutePoints] = useState<routeService.RoutePoint[]>([]);
+  const [routeDistance, setRouteDistance] = useState<number>(0);
+  const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const bottomSheetRef = useRef<BottomSheet>(null);
   const isCompletingRef = useRef(false);
 
   const snapPoints = useMemo(() => ['30%', '60%'], []);
+  
+  // Check if trip is escalated
+  const isEscalated = activeTrip?.status === 'escalated';
 
-  // Check-in timer
+  // Check-in timer (only active if trip is active, not escalated)
   const {
     pendingCheckin,
     timeUntilNextCheckin,
@@ -53,17 +65,37 @@ export default function ActiveTripScreen() {
     respondToCheckin,
   } = useCheckinTimer({
     trip: activeTrip,
-    isActive: !!activeTrip && activeTrip.status === 'active',
+    isActive: !!activeTrip && activeTrip.status === 'active' && !isEscalated,
     onCheckinCreated: async (checkin) => {
       setCheckinModalVisible(true);
       await sendCheckinNotification(checkin.id);
     },
     onCheckinMissed: async (checkin) => {
       setCheckinModalVisible(false);
-      Alert.alert(
-        'Check-in Missed',
-        'You missed a check-in. Your emergency contacts will be notified if you miss another one.'
-      );
+      
+      // Check if trip was escalated
+      const { data: updatedTrip } = await tripService.getActiveTrip();
+      if (updatedTrip?.status === 'escalated') {
+        // Escalation happened - show emergency alert
+        Alert.alert(
+          '🚨 Emergency Escalation',
+          'You missed multiple check-ins. Your emergency contacts have been notified and will be alerted about your situation.',
+          [{ text: 'OK', style: 'default' }],
+          { cancelable: false }
+        );
+        
+        // Send escalation notification to device
+        await sendEscalationNotification();
+        
+        // Refresh trip to get updated status
+        refreshActiveTrip();
+      } else {
+        // Just missed one check-in
+        Alert.alert(
+          'Check-in Missed',
+          'You missed a check-in. Your emergency contacts will be notified if you miss another one.'
+        );
+      }
     },
   });
 
@@ -93,16 +125,71 @@ export default function ActiveTripScreen() {
     return () => clearInterval(interval);
   }, [activeTrip]);
 
-  // Start location watching when trip is active
+  // Load route points when trip changes
+  useEffect(() => {
+    if (!activeTrip) {
+      setRoutePoints([]);
+      setRouteDistance(0);
+      return;
+    }
+
+    const loadRoutePoints = async () => {
+      setIsLoadingRoute(true);
+      try {
+        const { data, error } = await routeService.getRoutePoints(activeTrip.id);
+        
+        if (error) {
+          console.error('Error loading route points:', error);
+          return;
+        }
+
+        if (data) {
+          setRoutePoints(data);
+          
+          // Calculate distance
+          const distance = routeService.calculateRouteDistance(data);
+          setRouteDistance(distance);
+        }
+      } catch (err) {
+        console.error('Error loading route points:', err);
+      } finally {
+        setIsLoadingRoute(false);
+      }
+    };
+
+    loadRoutePoints();
+    
+    // Refresh route points every 5 seconds during active trip
+    const interval = setInterval(loadRoutePoints, 5000);
+    
+    return () => clearInterval(interval);
+  }, [activeTrip?.id]);
+
+  // Start location watching when trip is active (or escalated - continue tracking)
   useEffect(() => {
     if (!activeTrip) {
       stopWatchingLocation();
       return;
     }
 
+    // Continue location tracking for active and escalated trips
     if (activeTrip.mode === 'continuous' || activeTrip.mode === 'interval') {
       startWatchingLocation((newLocation) => {
-        updateLocation(newLocation.coords.latitude, newLocation.coords.longitude);
+        // Update location with metadata for route recording
+        updateLocation(
+          newLocation.coords.latitude,
+          newLocation.coords.longitude,
+          {
+            accuracy: newLocation.coords.accuracy ?? undefined,
+            altitude: newLocation.coords.altitude ?? undefined,
+            heading: newLocation.coords.heading !== null && newLocation.coords.heading !== undefined 
+              ? newLocation.coords.heading 
+              : undefined,
+            speed: newLocation.coords.speed !== null && newLocation.coords.speed !== undefined
+              ? newLocation.coords.speed
+              : undefined,
+          }
+        );
       });
     }
 
@@ -173,17 +260,48 @@ export default function ActiveTripScreen() {
     );
   }
 
-  function handleNeedHelp() {
+  async function handleNeedHelp() {
+    if (!activeTrip || isEscalated) {
+      return;
+    }
+
     Alert.alert(
-      'Need Help?',
-      'This will immediately notify your emergency contacts.',
+      '🚨 Need Help?',
+      'This will immediately notify your emergency contacts and mark this trip as escalated. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Yes, Send Alert',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert('Alert Sent', 'Your emergency contacts have been notified.');
+          onPress: async () => {
+            setIsEscalating(true);
+            try {
+              const { error } = await tripService.escalateTrip(activeTrip.id);
+              
+              if (error) {
+                Alert.alert('Error', error.error || 'Failed to send alert. Please try again.');
+                setIsEscalating(false);
+                return;
+              }
+
+              // Send escalation notification to device
+              await sendEscalationNotification();
+
+              // Refresh trip to get updated status
+              await refreshActiveTrip();
+
+              Alert.alert(
+                'Alert Sent',
+                'Your emergency contacts have been notified and will be alerted about your situation.',
+                [{ text: 'OK', style: 'default' }],
+                { cancelable: false }
+              );
+            } catch (error) {
+              console.error('Error escalating trip:', error);
+              Alert.alert('Error', 'Something went wrong. Please try again.');
+            } finally {
+              setIsEscalating(false);
+            }
           },
         },
       ]
@@ -225,6 +343,14 @@ export default function ActiveTripScreen() {
               }
             : undefined
         }
+        routePoints={
+          routePoints && routePoints.length > 0
+            ? routePoints.map((point: routeService.RoutePoint) => ({
+                latitude: point.latitude,
+                longitude: point.longitude,
+              }))
+            : []
+        }
       />
 
       <BottomSheet
@@ -240,12 +366,29 @@ export default function ActiveTripScreen() {
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <IconSymbol name="chevron.left" size={24} color="#fff" />
             </TouchableOpacity>
-            <View style={styles.statusBadge}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>Trip Active</Text>
-            </View>
+            {isEscalated ? (
+              <View style={[styles.statusBadge, styles.escalatedBadge]}>
+                <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#fff" />
+                <Text style={styles.statusText}>Emergency Escalated</Text>
+              </View>
+            ) : (
+              <View style={styles.statusBadge}>
+                <View style={styles.statusDot} />
+                <Text style={styles.statusText}>Trip Active</Text>
+              </View>
+            )}
             <View style={{ width: 40 }} />
           </View>
+          
+          {/* Escalation Alert Banner */}
+          {isEscalated && (
+            <View style={styles.escalationBanner}>
+              <IconSymbol name="exclamationmark.triangle.fill" size={20} color="#fff" />
+              <Text style={styles.escalationBannerText}>
+                Emergency contacts have been notified
+              </Text>
+            </View>
+          )}
 
           {/* Time Display */}
           <View style={styles.timeCard}>
@@ -255,6 +398,30 @@ export default function ActiveTripScreen() {
               <Text style={styles.timeValue}>{formatDurationWithSeconds(elapsedSeconds)}</Text>
             </View>
           </View>
+
+          {/* Route Stats */}
+          {routePoints.length > 0 && (
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <IconSymbol name="figure.walk" size={20} color="#fff" />
+                <View style={styles.statContent}>
+                  <Text style={styles.statLabel}>Distance</Text>
+                  <Text style={styles.statValue}>
+                    {routeDistance >= 1000
+                      ? `${(routeDistance / 1000).toFixed(2)} km`
+                      : `${Math.round(routeDistance)} m`}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.statItem}>
+                <IconSymbol name="mappin.circle.fill" size={20} color="#fff" />
+                <View style={styles.statContent}>
+                  <Text style={styles.statLabel}>Points</Text>
+                  <Text style={styles.statValue}>{routePoints.length}</Text>
+                </View>
+              </View>
+            </View>
+          )}
 
           {/* Trip Info */}
           <View style={styles.infoRow}>
@@ -293,11 +460,19 @@ export default function ActiveTripScreen() {
           {/* Action Buttons */}
           <View style={styles.actions}>
             <TouchableOpacity
-              style={styles.helpButton}
+              style={[styles.helpButton, (isEscalated || isLoading || isEscalating) && styles.buttonDisabled]}
               onPress={handleNeedHelp}
-              disabled={isLoading}>
-              <IconSymbol name="exclamationmark.triangle.fill" size={22} color="#fff" />
-              <Text style={styles.helpButtonText}>Need Help</Text>
+              disabled={isEscalated || isLoading || isEscalating}>
+              {isEscalating ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <IconSymbol name="exclamationmark.triangle.fill" size={22} color="#fff" />
+                  <Text style={styles.helpButtonText}>
+                    {isEscalated ? 'Alert Sent' : 'Need Help'}
+                  </Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -385,6 +560,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
+  escalatedBadge: {
+    backgroundColor: 'rgba(255, 59, 48, 0.3)',
+    gap: 6,
+  },
+  escalationBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 59, 48, 0.3)',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 59, 48, 0.5)',
+  },
+  escalationBannerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    flex: 1,
+  },
   timeCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -405,6 +601,34 @@ const styles = StyleSheet.create({
   timeValue: {
     fontSize: 24,
     fontWeight: 'bold',
+    color: '#fff',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  statItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    padding: 12,
+    borderRadius: 10,
+    gap: 10,
+  },
+  statContent: {
+    flex: 1,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: '#fff',
+    opacity: 0.8,
+    marginBottom: 2,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '600',
     color: '#fff',
   },
   infoRow: {

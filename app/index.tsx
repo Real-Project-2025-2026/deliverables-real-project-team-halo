@@ -9,6 +9,7 @@ export default function Index() {
   useEffect(() => {
     if (!isLoading) {
       if (session) {
+        // User is logged in - go to tabs
         router.replace('/(tabs)');
       } else {
         router.replace('/(auth)/login');

@@ -1,5 +1,10 @@
 import { supabase } from '@/lib/supabase';
 import type { Tables, TablesInsert } from '@/types/supabase';
+import {
+  getRecipientPushToken,
+  sendGuardianRequestNotification,
+  sendGuardianAcceptedNotification,
+} from '@/services/notification-service';
 
 export type Guardian = Tables<'guardians'>;
 export type GuardianStatus = 'pending' | 'accepted' | 'blocked';
@@ -51,20 +56,25 @@ export async function searchUsers(
       return { data: [], error: null };
     }
 
+    const searchQuery = query.trim();
+    console.log('[Guardian Search] Searching for username:', searchQuery);
+
     // Search for users by username (case-insensitive, partial match)
     // Only return users who have a username set
     const { data, error } = await supabase
       .from('profiles')
       .select('id, username, full_name, avatar_url')
-      .ilike('username', `%${query.trim()}%`)
+      .ilike('username', `%${searchQuery}%`)
       .not('username', 'is', null)
       .neq('id', session.user.id) // Exclude current user
       .limit(20);
 
     if (error) {
+      console.error('[Guardian Search] Error searching users:', error);
       return { data: null, error: { error: error.message, details: error } };
     }
 
+    console.log('[Guardian Search] Found users:', data?.length || 0, data?.map(u => u.username) || []);
     return { data: data || [], error: null };
   } catch (err) {
     return {
@@ -96,7 +106,7 @@ export async function sendGuardianRequest(
     // Check if recipient exists and has username
     const { data: recipient, error: recipientError } = await supabase
       .from('profiles')
-      .select('id, username')
+      .select('id, username, full_name')
       .eq('id', recipientId)
       .not('username', 'is', null)
       .single();
@@ -104,6 +114,13 @@ export async function sendGuardianRequest(
     if (recipientError || !recipient) {
       return { data: null, error: { error: 'User not found' } };
     }
+
+    // Get requester profile data for notification
+    const { data: requester } = await supabase
+      .from('profiles')
+      .select('username, full_name')
+      .eq('id', session.user.id)
+      .single();
 
     // Check if relationship already exists
     const { data: existing, error: existingError } = await supabase
@@ -158,6 +175,21 @@ export async function sendGuardianRequest(
       return { data: null, error: { error: error.message, details: error } };
     }
 
+    // Send push notification to recipient (non-blocking)
+    if (data) {
+      const recipientPushToken = await getRecipientPushToken(recipientId);
+      if (recipientPushToken && requester) {
+        sendGuardianRequestNotification(
+          recipientPushToken,
+          requester.full_name || requester.username || 'Someone',
+          requester.username || 'unknown'
+        ).catch((err) => {
+          console.error('Error sending Guardian request notification:', err);
+          // Don't fail the request if notification fails
+        });
+      }
+    }
+
     return { data, error: null };
   } catch (err) {
     return {
@@ -195,6 +227,20 @@ export async function acceptGuardianRequest(
       return { data: null, error: { error: 'Request not found or already processed' } };
     }
 
+    // Get requester and acceptor profile data for notification
+    const [requesterResult, acceptorResult] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('username, full_name')
+        .eq('id', request.requester_id)
+        .single(),
+      supabase
+        .from('profiles')
+        .select('username, full_name')
+        .eq('id', session.user.id)
+        .single(),
+    ]);
+
     // Update status to accepted
     const { data, error } = await supabase
       .from('guardians')
@@ -208,6 +254,21 @@ export async function acceptGuardianRequest(
 
     if (error) {
       return { data: null, error: { error: error.message, details: error } };
+    }
+
+    // Send push notification to requester (non-blocking)
+    if (data && requesterResult.data && acceptorResult.data) {
+      const requesterPushToken = await getRecipientPushToken(request.requester_id);
+      if (requesterPushToken) {
+        sendGuardianAcceptedNotification(
+          requesterPushToken,
+          acceptorResult.data.full_name || acceptorResult.data.username || 'Someone',
+          acceptorResult.data.username || 'unknown'
+        ).catch((err) => {
+          console.error('Error sending Guardian accepted notification:', err);
+          // Don't fail the accept if notification fails
+        });
+      }
     }
 
     return { data, error: null };

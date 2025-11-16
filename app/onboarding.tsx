@@ -1,25 +1,25 @@
-import { useState, useRef, useEffect } from 'react';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/providers/auth-provider';
+import { checkUsernameAvailability, validateUsernameFormat } from '@/services/username-service';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  Dimensions,
-  ViewToken,
-  Image,
-  TextInput,
   ActivityIndicator,
+  Dimensions,
+  FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  ViewToken,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { useAuth } from '@/providers/auth-provider';
-import { checkUsernameAvailability, updateUsername, validateUsernameFormat } from '@/services/username-service';
-import { supabase } from '@/lib/supabase';
 
 const { width } = Dimensions.get('window');
 
@@ -55,38 +55,83 @@ const slides: OnboardingSlide[] = [
 ];
 
 export default function OnboardingScreen() {
-  const { user } = useAuth();
+  const { user, profile, session, isLoading, refreshProfile } = useAuth();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userName, setUserName] = useState('');
   const [username, setUsername] = useState('');
   const [usernameError, setUsernameError] = useState('');
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
-  const [showUsernameInput, setShowUsernameInput] = useState(false);
+  // Default to showing username input - will be hidden if user already has username
+  const [showUsernameInput, setShowUsernameInput] = useState(true);
   const [usernameCompleted, setUsernameCompleted] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
+    // If no session and not loading, redirect to login
+    if (!isLoading && !session) {
+      console.log('[Onboarding] No session - redirecting to login');
+      router.replace('/(auth)/login');
+      return;
+    }
+
+    // Skip all checks if we're currently setting username
+    if (isCheckingUsername) {
+      return;
+    }
+
+    // If user already has username and session, redirect to tabs
+    if (!isLoading && session && profile?.username) {
+      console.log('[Onboarding] User already has username - redirecting to tabs');
+      router.replace('/(tabs)');
+      return;
+    }
+
+    // If no session after loading, redirect to login (prevents infinite loop)
+    if (!isLoading && !session) {
+      console.log('[Onboarding] No session after loading - redirecting to login');
+      router.replace('/(auth)/login');
+      return;
+    }
+
     loadUserName();
-    // Check if user already has a username
-    checkExistingUsername();
-  }, [user]);
+    // After sign-up, user ALWAYS needs to set username
+    // Only check if user already has username (for users coming back to onboarding)
+    if (session && user) {
+      checkExistingUsername();
+    }
+  }, [user, profile, session, isLoading, isCheckingUsername]);
 
   async function checkExistingUsername() {
-    if (user) {
-      // Check if user already has username set
+    // After sign-up, user NEVER has a username yet - so always show username input
+    // Only skip username input if user already completed onboarding before (very rare case)
+    
+    // Check if user already has username (only possible if they already completed onboarding)
+    if (profile?.username && profile.username.trim().length > 0) {
+      console.log('[Onboarding] User already has username, skipping to slides');
+      setUsernameCompleted(true);
+      setShowUsernameInput(false);
+      return;
+    }
+
+    // Default: Show username input (all new sign-ups need this)
+    // This will be the case 99% of the time
+    console.log('[Onboarding] New user or no username - showing username input');
+    setShowUsernameInput(true);
+    setUsernameCompleted(false);
+    
+    // Optional: Double-check from database (but shouldn't be necessary)
+    if (user && !profile) {
       const { data } = await supabase
         .from('profiles')
         .select('username')
         .eq('id', user.id)
         .single();
       
-      if (data?.username) {
-        // User already has username, skip to slides
+      if (data?.username && data.username.trim().length > 0) {
+        // Very rare: User already has username (already completed onboarding)
+        console.log('[Onboarding] User already has username in database, skipping to slides');
         setUsernameCompleted(true);
         setShowUsernameInput(false);
-      } else {
-        // Show username input
-        setShowUsernameInput(true);
       }
     }
   }
@@ -96,7 +141,7 @@ export default function OnboardingScreen() {
       const name = await AsyncStorage.getItem('@halo_onboarding_name');
       if (name) {
         setUserName(name);
-        await AsyncStorage.removeItem('@halo_onboarding_name');
+        // Don't remove from AsyncStorage here - AuthProvider will clear it after creating profile
       }
     } catch (error) {
       console.error('Error loading user name:', error);
@@ -129,17 +174,158 @@ export default function OnboardingScreen() {
 
       // Update username
       if (user) {
-        const result = await updateUsername(user.id, username);
-        if (!result.success) {
-          setUsernameError(result.error || 'Failed to set username');
+        console.log('[Onboarding] User ID before updateUsername:', user.id);
+        console.log('[Onboarding] Username to set:', username.trim().toLowerCase());
+        
+        // Verify session is active
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        console.log('[Onboarding] Session check:', { 
+          hasSession: !!session, 
+          sessionUserId: session?.user?.id,
+          matchesUser: session?.user?.id === user.id,
+          sessionError 
+        });
+        
+        if (!session || session.user.id !== user.id) {
+          console.error('[Onboarding] Session mismatch or missing');
+          setUsernameError('Session error. Please try again.');
+          setIsCheckingUsername(false);
+          return;
+        }
+        
+        // Check if profile exists, if not create it first
+        const { data: existingProfile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .single();
+        
+        if (profileError && profileError.code === 'PGRST116') {
+          console.log('[Onboarding] Profile does not exist, creating it with RPC function...');
+          
+          // Profile doesn't exist - use RPC function to create it safely
+          const fullName = await AsyncStorage.getItem('@halo_onboarding_name');
+          
+          const { data: newProfile, error: createError } = await supabase
+            .rpc('upsert_profile', {
+              p_user_id: user.id,
+              p_username: username.trim().toLowerCase(),
+              p_full_name: fullName?.trim() || null,
+            });
+          
+          if (createError) {
+            console.error('[Onboarding] Error creating profile via RPC:', createError);
+            setUsernameError('Failed to create profile. Please try again.');
+            setIsCheckingUsername(false);
+            return;
+          }
+          
+          console.log('[Onboarding] ✅ Profile created with username via RPC:', newProfile);
+          
+          // Clear AsyncStorage after successful creation
+          if (fullName) {
+            await AsyncStorage.removeItem('@halo_onboarding_name');
+          }
+          
+          // Wait a moment for the profile to be updated in the database
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          
+          // Navigate to tabs now that profile is created
+          router.replace('/(tabs)');
+          return; // Exit early - navigation handled
+        } else if (profileError) {
+          console.error('[Onboarding] Error checking profile:', profileError);
+          setUsernameError('Profile error. Please try again.');
+          setIsCheckingUsername(false);
+          return;
+        } else {
+          // Profile exists - use RPC function to update username safely
+          console.log('[Onboarding] Profile exists, updating username via RPC...');
+          
+          const { data: updatedProfile, error: updateError } = await supabase
+            .rpc('upsert_profile', {
+              p_user_id: user.id,
+              p_username: username.trim().toLowerCase(),
+              p_full_name: null, // Don't update full_name, just username
+            });
+          
+          if (updateError) {
+            console.error('[Onboarding] Error updating username via RPC:', updateError);
+            setUsernameError('Failed to update username. Please try again.');
+            setIsCheckingUsername(false);
+            return;
+          }
+          
+          console.log('[Onboarding] ✅ Username updated via RPC:', updatedProfile);
+        }
+      } else {
+        console.error('[Onboarding] No user available for username update');
+        setUsernameError('User not found. Please try again.');
+        setIsCheckingUsername(false);
+        return;
+      }
+
+      // Username set successfully
+      setUsernameCompleted(true);
+      setShowUsernameInput(false);
+      
+      // Wait a moment for profile to be saved
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      
+      // Force refresh profile by reloading it from database
+      // This ensures the profile has the username before navigation
+      const { data: refreshedProfile, error: refreshError } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .single();
+      
+      if (refreshError) {
+        console.error('[Onboarding] Error refreshing profile:', refreshError);
+      } else {
+        console.log('[Onboarding] ✅ Profile refreshed, username:', refreshedProfile?.username);
+        
+        // Verify username was saved
+        if (!refreshedProfile?.username) {
+          console.error('[Onboarding] ⚠️ Username not found in refreshed profile!');
+          setUsernameError('Username was not saved. Please try again.');
           setIsCheckingUsername(false);
           return;
         }
       }
-
-      // Username set successfully, proceed to slides
-      setUsernameCompleted(true);
-      setShowUsernameInput(false);
+      
+      // Force AuthProvider to reload profile and wait for it to complete
+      if (refreshProfile) {
+        console.log('[Onboarding] Refreshing profile in AuthProvider...');
+        await refreshProfile();
+        
+        // Wait a bit more for state to update
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      
+      // Double-check that profile has username before navigating
+      const { data: finalCheck, error: checkError } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .single();
+      
+      if (checkError || !finalCheck?.username) {
+        console.error('[Onboarding] ❌ Username still not in profile after refresh!', checkError);
+        setUsernameError('Username was not saved correctly. Please try again.');
+        setIsCheckingUsername(false);
+        return;
+      }
+      
+      console.log('[Onboarding] ✅ Final check passed, username confirmed:', finalCheck.username);
+      
+      // Wait a moment more to ensure AuthProvider state is updated
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      
+      // Now navigate to tabs - profile definitely has username
+      console.log('[Onboarding] Navigating to tabs...');
+      setIsCheckingUsername(false); // Reset before navigation
+      router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Error setting username:', error);
       setUsernameError(error.message || 'Failed to set username');
@@ -199,8 +385,18 @@ export default function OnboardingScreen() {
 
   const isLastSlide = currentIndex === slides.length - 1;
 
-  // Show username input screen first
+  // Debug logging
+  console.log('[Onboarding] Render state:', {
+    showUsernameInput,
+    usernameCompleted,
+    hasUser: !!user,
+    userName,
+  });
+
+  // Show username input screen first if user needs to set username
+  // Always show if showUsernameInput is true, unless username is already completed
   if (showUsernameInput && !usernameCompleted) {
+    console.log('[Onboarding] Rendering username input screen');
     return (
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView
@@ -268,6 +464,8 @@ export default function OnboardingScreen() {
       </SafeAreaView>
     );
   }
+
+  console.log('[Onboarding] Rendering onboarding slides');
 
   return (
     <SafeAreaView style={styles.container}>

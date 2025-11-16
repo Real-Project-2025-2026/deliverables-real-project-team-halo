@@ -7,11 +7,20 @@ interface UseTripReturn {
   activeTrip: Trip | null;
   isLoading: boolean;
   error: string | null;
-  startTrip: (params: StartTripParams) => Promise<{ success: boolean; trip: Trip | null }>;
+  startTrip: (params: StartTripParams) => Promise<{ success: boolean; trip: Trip | null; error?: string }>;
   completeTrip: () => Promise<{ success: boolean }>;
   cancelTrip: () => Promise<{ success: boolean }>;
   refreshActiveTrip: () => Promise<void>;
-  updateLocation: (latitude: number, longitude: number) => Promise<void>;
+  updateLocation: (
+    latitude: number,
+    longitude: number,
+    metadata?: {
+      accuracy?: number;
+      altitude?: number;
+      heading?: number;
+      speed?: number;
+    }
+  ) => Promise<void>;
 }
 
 /**
@@ -63,7 +72,7 @@ export function useTrip(): UseTripReturn {
   }, [user]);
 
   const startTrip = useCallback(
-    async (params: StartTripParams): Promise<{ success: boolean; trip: Trip | null }> => {
+    async (params: StartTripParams): Promise<{ success: boolean; trip: Trip | null; error?: string }> => {
       try {
         setIsLoading(true);
         setError(null);
@@ -71,8 +80,9 @@ export function useTrip(): UseTripReturn {
         const { data, error: tripError } = await tripService.startTrip(params);
 
         if (tripError) {
-          setError(tripError.error);
-          return { success: false, trip: null };
+          const errorMessage = tripError.error || 'Failed to start trip';
+          setError(errorMessage);
+          return { success: false, trip: null, error: errorMessage };
         }
 
         if (data) {
@@ -80,11 +90,14 @@ export function useTrip(): UseTripReturn {
           return { success: true, trip: data };
         }
 
-        return { success: false, trip: null };
-      } catch (err) {
-        setError('Failed to start trip');
+        const errorMessage = 'Failed to start trip - no trip data returned';
+        setError(errorMessage);
+        return { success: false, trip: null, error: errorMessage };
+      } catch (err: any) {
+        const errorMessage = err?.message || 'Failed to start trip';
+        setError(errorMessage);
         console.error('Error starting trip:', err);
-        return { success: false, trip: null };
+        return { success: false, trip: null, error: errorMessage };
       } finally {
         setIsLoading(false);
       }
@@ -149,11 +162,20 @@ export function useTrip(): UseTripReturn {
   }, [activeTrip]);
 
   const updateLocation = useCallback(
-    async (latitude: number, longitude: number) => {
+    async (
+      latitude: number,
+      longitude: number,
+      metadata?: {
+        accuracy?: number;
+        altitude?: number;
+        heading?: number;
+        speed?: number;
+      }
+    ) => {
       if (!activeTrip) return;
 
       try {
-        await tripService.updateTripLocation(activeTrip.id, latitude, longitude);
+        await tripService.updateTripLocation(activeTrip.id, latitude, longitude, metadata);
       } catch (err) {
         console.error('Error updating trip location:', err);
       }

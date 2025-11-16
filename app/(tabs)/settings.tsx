@@ -55,6 +55,25 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Emergency Contacts Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Safety</Text>
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => router.push('/emergency-contacts')}>
+            <View style={styles.row}>
+              <View style={styles.iconContainer}>
+                <IconSymbol name="exclamationmark.triangle.fill" size={20} color="#fff" />
+              </View>
+              <View style={styles.info}>
+                <Text style={styles.label}>Emergency Contacts</Text>
+                <Text style={styles.value}>Manage trusted contacts</Text>
+              </View>
+              <IconSymbol name="chevron.right" size={20} color="#fff" opacity={0.6} />
+            </View>
+          </TouchableOpacity>
+        </View>
+
         {/* Safety Preferences Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Safety Preferences</Text>

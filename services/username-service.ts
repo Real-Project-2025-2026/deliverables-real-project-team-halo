@@ -92,23 +92,73 @@ export async function updateUsername(
       return { success: false, error: availability.error };
     }
 
-    const { error } = await supabase
+    // First, check if profile exists, if not create it
+    const { data: existingProfile, error: checkError } = await supabase
       .from('profiles')
-      .update({
-        username: username.trim().toLowerCase(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', userId);
+      .select('id')
+      .eq('id', userId)
+      .single();
 
-    if (error) {
-      // Check for unique constraint violation
-      if (error.code === '23505') {
-        return { success: false, error: 'Username is already taken' };
-      }
-      throw error;
+    if (checkError && checkError.code !== 'PGRST116') {
+      // PGRST116 = no rows found, which is fine - we'll create it
+      console.error('[Username Service] Error checking profile:', checkError);
+      throw checkError;
     }
 
-    return { success: true };
+    // Verify session before attempting update
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    console.log('[Username Service] Session check:', {
+      hasSession: !!session,
+      sessionUserId: session?.user?.id,
+      userId,
+      match: session?.user?.id === userId,
+      sessionError,
+    });
+
+    if (!session || session.user.id !== userId) {
+      const errorMsg = 'Session verification failed. Please try again.';
+      console.error('[Username Service]', errorMsg);
+      return { success: false, error: errorMsg };
+    }
+
+    // Use RPC function to safely upsert username
+    // This bypasses RLS issues and handles profile creation automatically
+    console.log('[Username Service] Attempting to upsert username via RPC');
+    console.log('[Username Service] User ID:', userId);
+    console.log('[Username Service] Username:', username.trim().toLowerCase());
+    
+    const { data: profileData, error: rpcError } = await supabase.rpc('upsert_profile', {
+      p_user_id: userId,
+      p_username: username.trim().toLowerCase(),
+      p_full_name: null, // Don't update full_name
+    });
+    
+    console.log('[Username Service] RPC result:', {
+      data: profileData,
+      error: rpcError ? {
+        message: rpcError.message,
+        code: rpcError.code,
+        details: rpcError.details,
+        hint: rpcError.hint,
+      } : null,
+    });
+    
+    if (rpcError) {
+      // Check for unique constraint violation (username already taken)
+      if (rpcError.code === '23505') {
+        return { success: false, error: 'Username is already taken' };
+      }
+      console.error('[Username Service] ❌ Error saving username via RPC:', rpcError);
+      throw rpcError;
+    }
+    
+    if (profileData) {
+      console.log('[Username Service] ✅ Username saved successfully via RPC!');
+      return { success: true };
+    } else {
+      console.error('[Username Service] ❌ RPC returned no data');
+      return { success: false, error: 'Failed to save username' };
+    }
   } catch (error: any) {
     console.error('Error updating username:', error);
     return {

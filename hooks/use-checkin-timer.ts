@@ -255,20 +255,32 @@ export function useCheckinTimer({
       }
 
       setPendingCheckin(null);
-      setMissedCheckinsCount((prev) => prev + 1);
 
-      // Reload trip to get updated missed count
+      // Increment missed check-ins count in database
       if (trip) {
-        const { data: updatedTrip } = await tripService.getActiveTrip();
-        if (updatedTrip) {
-          setMissedCheckinsCount(updatedTrip.missed_checkins_count || 0);
-        }
-      }
-
-      // Check if escalation is needed (2+ missed)
-      if (missedCheckinsCount + 1 >= 2) {
-        if (trip) {
-          await tripService.escalateTrip(trip.id);
+        const { missedCount, error: incrementError } = await tripService.incrementMissedCheckins(trip.id);
+        
+        if (incrementError) {
+          console.error('Error incrementing missed check-ins:', incrementError);
+        } else {
+          // Update local state with new count from database
+          setMissedCheckinsCount(missedCount);
+          
+          // Check if escalation is needed (2+ missed check-ins)
+          if (missedCount >= 2) {
+            console.log(`Escalating trip: ${missedCount} missed check-ins`);
+            const { error: escalateError } = await tripService.escalateTrip(trip.id);
+            
+            if (escalateError) {
+              console.error('Error escalating trip:', escalateError);
+            } else {
+              // Reload trip to get updated status
+              const { data: updatedTrip } = await tripService.getActiveTrip();
+              if (updatedTrip) {
+                setMissedCheckinsCount(updatedTrip.missed_checkins_count || 0);
+              }
+            }
+          }
         }
       }
 

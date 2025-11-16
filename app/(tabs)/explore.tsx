@@ -12,8 +12,10 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { useLocalSearchParams, router } from 'expo-router';
 import { useAuth } from '@/providers/auth-provider';
 import { useGuardian } from '@/hooks/use-guardian';
+import { useGuardianTrips } from '@/hooks/use-guardian-trips';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import type { GuardianWithProfile, PublicUserProfile } from '@/services/guardian-service';
 import * as guardianService from '@/services/guardian-service';
@@ -22,6 +24,7 @@ type TabType = 'guardians' | 'search' | 'requests';
 
 export default function SafeTogetherScreen() {
   const { user } = useAuth();
+  const params = useLocalSearchParams<{ tab?: string }>();
   const {
     guardians,
     pendingRequests,
@@ -36,7 +39,24 @@ export default function SafeTogetherScreen() {
     refresh,
   } = useGuardian();
 
-  const [activeTab, setActiveTab] = useState<TabType>('guardians');
+  // Guardian Trips (active trips where user is a Guardian)
+  const {
+    guardianTrips,
+    isLoading: isLoadingTrips,
+    refresh: refreshTrips,
+  } = useGuardianTrips();
+
+  // Initialize activeTab from URL params or default
+  const [activeTab, setActiveTab] = useState<TabType>(
+    (params?.tab as TabType) || 'guardians'
+  );
+
+  // Update tab when URL params change (for notification navigation)
+  useEffect(() => {
+    if (params?.tab && ['guardians', 'search', 'requests'].includes(params.tab)) {
+      setActiveTab(params.tab as TabType);
+    }
+  }, [params?.tab]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PublicUserProfile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -50,12 +70,14 @@ export default function SafeTogetherScreen() {
         return;
       }
 
+      console.log('[Explore Screen] Performing search for:', query);
       setIsSearching(true);
       try {
         const results = await searchUsersHook(query);
+        console.log('[Explore Screen] Search results:', results.length, results.map(r => r.username));
         setSearchResults(results);
       } catch (err) {
-        console.error('Search error:', err);
+        console.error('[Explore Screen] Search error:', err);
       } finally {
         setIsSearching(false);
       }
@@ -93,11 +115,13 @@ export default function SafeTogetherScreen() {
       const success = await sendRequest(recipientId);
       if (success) {
         Alert.alert('Request Sent', `Guardian request sent to @${username}`);
+        // Refresh to update UI
+        await refresh();
       } else {
         Alert.alert('Error', error || 'Failed to send request');
       }
     },
-    [sendRequest, error]
+    [sendRequest, error, refresh]
   );
 
   const handleAcceptRequest = useCallback(
@@ -185,6 +209,83 @@ export default function SafeTogetherScreen() {
       );
     },
     []
+  );
+
+  // Render Guardian Trip item
+  const renderGuardianTrip = useCallback(
+    ({ item }: { item: import('@/hooks/use-guardian-trips').GuardianTrip }) => {
+      const displayName = item.user_profile.full_name || item.user_profile.username || 'Unknown';
+      const elapsedSeconds = Math.floor(
+        (Date.now() - new Date(item.started_at).getTime()) / 1000
+      );
+      const minutes = Math.floor(elapsedSeconds / 60);
+      const seconds = elapsedSeconds % 60;
+      const elapsedTime = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+      const isEscalated = item.status === 'escalated';
+
+      return (
+        <TouchableOpacity
+          style={styles.tripCard}
+          onPress={() => router.push(`/guardian-trip/${item.id}`)}>
+          <View style={styles.tripHeader}>
+            {renderAvatar(item.user_profile)}
+            <View style={styles.tripInfo}>
+              <Text style={styles.tripUserName}>
+                @{item.user_profile.username || 'unknown'}
+              </Text>
+              {item.user_profile.full_name && (
+                <Text style={styles.tripFullName}>{displayName}</Text>
+              )}
+            </View>
+            <View
+              style={[
+                styles.tripStatusBadge,
+                isEscalated && styles.tripStatusBadgeEscalated,
+              ]}>
+              <IconSymbol
+                name={isEscalated ? 'exclamationmark.triangle.fill' : 'circle.fill'}
+                size={8}
+                color="#fff"
+              />
+              <Text style={styles.tripStatusText}>
+                {isEscalated ? 'Emergency' : 'Active'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.tripStats}>
+            <View style={styles.tripStatItem}>
+              <IconSymbol name="clock.fill" size={14} color="rgba(255, 255, 255, 0.7)" />
+              <Text style={styles.tripStatText}>{elapsedTime}</Text>
+            </View>
+            {item.mode !== 'silent' && (
+              <View style={styles.tripStatItem}>
+                <IconSymbol name="bell.fill" size={14} color="rgba(255, 255, 255, 0.7)" />
+                <Text style={styles.tripStatText}>
+                  {item.checkin_interval_minutes}min
+                </Text>
+              </View>
+            )}
+            {isEscalated && item.missed_checkins_count && item.missed_checkins_count > 0 && (
+              <View style={[styles.tripStatItem, styles.tripStatItemWarning]}>
+                <IconSymbol
+                  name="exclamationmark.triangle.fill"
+                  size={14}
+                  color="#FF3B30"
+                />
+                <Text style={[styles.tripStatText, styles.tripStatTextWarning]}>
+                  {item.missed_checkins_count} missed
+                </Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.tripFooter}>
+            <IconSymbol name="chevron.right" size={16} color="rgba(255, 255, 255, 0.6)" />
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [renderAvatar]
   );
 
   // Render Guardian item
@@ -397,14 +498,44 @@ export default function SafeTogetherScreen() {
 
       {/* Content */}
       {activeTab === 'guardians' && (
-        <FlatList
-          data={guardians}
-          renderItem={renderGuardian}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContent}
-          ListEmptyComponent={renderEmptyGuardians}
-          refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refresh} tintColor="#fff" />}
-        />
+        <View style={styles.guardiansContent}>
+          {/* Active Guardian Trips Section */}
+          {guardianTrips.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Active Trips</Text>
+              <FlatList
+                data={guardianTrips}
+                renderItem={renderGuardianTrip}
+                keyExtractor={(item) => `trip-${item.id}`}
+                contentContainerStyle={styles.tripsListContent}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+              />
+            </View>
+          )}
+
+          {/* Guardians List */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>My Guardians</Text>
+            <FlatList
+              data={guardians}
+              renderItem={renderGuardian}
+              keyExtractor={(item) => item.id.toString()}
+              contentContainerStyle={styles.listContent}
+              ListEmptyComponent={renderEmptyGuardians}
+              refreshControl={
+                <RefreshControl
+                  refreshing={isLoading || isLoadingTrips}
+                  onRefresh={() => {
+                    refresh();
+                    refreshTrips();
+                  }}
+                  tintColor="#fff"
+                />
+              }
+            />
+          </View>
+        </View>
       )}
 
       {activeTab === 'search' && (
@@ -553,6 +684,94 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: '#fff',
+  },
+  guardiansContent: {
+    flex: 1,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    opacity: 0.9,
+    marginBottom: 12,
+    paddingHorizontal: 24,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  tripsListContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 12,
+  },
+  tripCard: {
+    width: 280,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 16,
+    padding: 16,
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  tripHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tripInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  tripUserName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  tripFullName: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  tripStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(52, 199, 89, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  tripStatusBadgeEscalated: {
+    backgroundColor: 'rgba(255, 59, 48, 0.3)',
+  },
+  tripStatusText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  tripStats: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 8,
+  },
+  tripStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  tripStatItemWarning: {
+    gap: 4,
+  },
+  tripStatText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  tripStatTextWarning: {
+    color: '#FF3B30',
+  },
+  tripFooter: {
+    alignItems: 'flex-end',
   },
   listContent: {
     paddingHorizontal: 24,
