@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/providers/auth-provider';
@@ -27,7 +27,10 @@ export default function SettingsScreen() {
         <Text style={styles.title}>Settings</Text>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}>
         {/* User Info Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
@@ -137,7 +140,7 @@ export default function SettingsScreen() {
           <IconSymbol name="arrow.right.square" size={20} color="#fff" />
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -156,9 +159,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
   },
-  content: {
+  scrollView: {
     flex: 1,
+  },
+  content: {
     paddingHorizontal: 24,
+    paddingBottom: 24,
   },
   section: {
     marginBottom: 24,
@@ -217,6 +223,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FF3B30',
     gap: 8,
+    marginTop: 8,
+    marginBottom: 24,
   },
   signOutText: {
     fontSize: 16,

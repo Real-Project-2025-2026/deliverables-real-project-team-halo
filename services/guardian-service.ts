@@ -37,7 +37,7 @@ export interface GuardianServiceError {
 }
 
 /**
- * Search for users by username (for Guardian requests)
+ * Search for users by username or email (for Guardian requests)
  * Returns users with public profile info (id, username, full_name, avatar_url)
  */
 export async function searchUsers(
@@ -57,24 +57,19 @@ export async function searchUsers(
     }
 
     const searchQuery = query.trim();
-    console.log('[Guardian Search] Searching for username:', searchQuery);
+    console.log('[Guardian Search] Searching for username or email:', searchQuery);
 
-    // Search for users by username (case-insensitive, partial match)
-    // Only return users who have a username set
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, username, full_name, avatar_url')
-      .ilike('username', `%${searchQuery}%`)
-      .not('username', 'is', null)
-      .neq('id', session.user.id) // Exclude current user
-      .limit(20);
+    // Use the database function to search by username or email
+    const { data, error } = await supabase.rpc('search_users_by_username_or_email', {
+      search_query: searchQuery,
+    });
 
     if (error) {
       console.error('[Guardian Search] Error searching users:', error);
       return { data: null, error: { error: error.message, details: error } };
     }
 
-    console.log('[Guardian Search] Found users:', data?.length || 0, data?.map(u => u.username) || []);
+    console.log('[Guardian Search] Found users:', data?.length || 0, data?.map(u => u.username || 'no-username') || []);
     return { data: data || [], error: null };
   } catch (err) {
     return {

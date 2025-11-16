@@ -9,9 +9,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   RefreshControl,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -56,10 +58,34 @@ export default function SafeTogetherScreen() {
       setActiveTab(params.tab as TabType);
     }
   }, [params?.tab]);
+
+  // Sync scroll position with active tab
+  useEffect(() => {
+    const tabIndex = ['guardians', 'search', 'requests'].indexOf(activeTab);
+    if (tabIndex >= 0 && scrollViewRef.current) {
+      const screenWidth = Dimensions.get('window').width;
+      scrollViewRef.current.scrollTo({
+        x: tabIndex * screenWidth,
+        animated: true,
+      });
+    }
+  }, [activeTab]);
+
+  // Handle scroll end to update active tab
+  const handleScroll = useCallback((event: any) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const screenWidth = event.nativeEvent.layoutMeasurement.width;
+    const tabIndex = Math.round(offsetX / screenWidth);
+    const tabs: TabType[] = ['guardians', 'search', 'requests'];
+    if (tabs[tabIndex] && tabs[tabIndex] !== activeTab) {
+      setActiveTab(tabs[tabIndex]);
+    }
+  }, [activeTab]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PublicUserProfile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   // Search with debounce
   const performSearch = useCallback(
@@ -365,8 +391,15 @@ export default function SafeTogetherScreen() {
         <View style={styles.searchCard}>
           {renderAvatar(item)}
           <View style={styles.searchInfo}>
-            <Text style={styles.searchUsername}>@{item.username || 'unknown'}</Text>
-            {item.full_name && <Text style={styles.searchName}>{item.full_name}</Text>}
+            <Text style={styles.searchUsername}>
+              {item.username ? `@${item.username}` : item.full_name || 'Unknown User'}
+            </Text>
+            {item.full_name && item.username && (
+              <Text style={styles.searchName}>{item.full_name}</Text>
+            )}
+            {!item.username && !item.full_name && (
+              <Text style={styles.searchName}>No profile set up yet</Text>
+            )}
           </View>
           {actionButton}
         </View>
@@ -438,7 +471,7 @@ export default function SafeTogetherScreen() {
       <IconSymbol name="magnifyingglass" size={64} color="rgba(255, 255, 255, 0.3)" />
       <Text style={styles.emptyTitle}>Search for users</Text>
       <Text style={styles.emptyText}>
-        Type at least 3 characters to search for users by username.
+        Type at least 3 characters to search for users by username or email.
       </Text>
     </View>
   );
@@ -495,96 +528,110 @@ export default function SafeTogetherScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Content */}
-      {activeTab === 'guardians' && (
-        <View style={styles.guardiansContent}>
-          {/* Active Guardian Trips Section */}
-          {guardianTrips.length > 0 && (
+      {/* Content with Swipe Support */}
+      <ScrollView
+        ref={scrollViewRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={handleScroll}
+        scrollEventThrottle={16}
+        style={styles.contentScrollView}
+        contentContainerStyle={styles.contentScrollViewContent}>
+        {/* Guardians Tab */}
+        <View style={styles.tabContent}>
+          <View style={styles.guardiansContent}>
+            {/* Active Guardian Trips Section */}
+            {guardianTrips.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Active Trips</Text>
+                <FlatList
+                  data={guardianTrips}
+                  renderItem={renderGuardianTrip}
+                  keyExtractor={(item) => `trip-${item.id}`}
+                  contentContainerStyle={styles.tripsListContent}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                />
+              </View>
+            )}
+
+            {/* Guardians List */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Active Trips</Text>
+              <Text style={styles.sectionTitle}>My Guardians</Text>
               <FlatList
-                data={guardianTrips}
-                renderItem={renderGuardianTrip}
-                keyExtractor={(item) => `trip-${item.id}`}
-                contentContainerStyle={styles.tripsListContent}
-                horizontal
-                showsHorizontalScrollIndicator={false}
+                data={guardians}
+                renderItem={renderGuardian}
+                keyExtractor={(item) => item.id.toString()}
+                contentContainerStyle={styles.listContent}
+                ListEmptyComponent={renderEmptyGuardians}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={isLoading || isLoadingTrips}
+                    onRefresh={() => {
+                      refresh();
+                      refreshTrips();
+                    }}
+                    tintColor="#fff"
+                  />
+                }
               />
             </View>
-          )}
+          </View>
+        </View>
 
-          {/* Guardians List */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>My Guardians</Text>
+        {/* Search Tab */}
+        <View style={styles.tabContent}>
+          <View style={styles.searchContainer}>
+            <View style={styles.searchInputContainer}>
+              <IconSymbol name="magnifyingglass" size={20} color="rgba(255, 255, 255, 0.6)" />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search by username or email..."
+                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                value={searchQuery}
+                onChangeText={handleSearchChange}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+              />
+              {isSearching && <ActivityIndicator size="small" color="#fff" />}
+            </View>
+
             <FlatList
-              data={guardians}
-              renderItem={renderGuardian}
-              keyExtractor={(item) => item.id.toString()}
+              data={searchResults}
+              renderItem={renderSearchResult}
+              keyExtractor={(item) => item.id}
               contentContainerStyle={styles.listContent}
-              ListEmptyComponent={renderEmptyGuardians}
-              refreshControl={
-                <RefreshControl
-                  refreshing={isLoading || isLoadingTrips}
-                  onRefresh={() => {
-                    refresh();
-                    refreshTrips();
-                  }}
-                  tintColor="#fff"
-                />
+              ListEmptyComponent={
+                searchQuery.length >= 3
+                  ? renderEmptySearch
+                  : () => (
+                      <View style={styles.emptyState}>
+                        <IconSymbol name="magnifyingglass" size={64} color="rgba(255, 255, 255, 0.3)" />
+                        <Text style={styles.emptyTitle}>Search for friends</Text>
+                        <Text style={styles.emptyText}>
+                          Type at least 3 characters to search for users by username or email.
+                        </Text>
+                      </View>
+                    )
               }
             />
           </View>
         </View>
-      )}
 
-      {activeTab === 'search' && (
-        <View style={styles.searchContainer}>
-          <View style={styles.searchInputContainer}>
-            <IconSymbol name="magnifyingglass" size={20} color="rgba(255, 255, 255, 0.6)" />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by username..."
-              placeholderTextColor="rgba(255, 255, 255, 0.5)"
-              value={searchQuery}
-              onChangeText={handleSearchChange}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {isSearching && <ActivityIndicator size="small" color="#fff" />}
-          </View>
-
+        {/* Requests Tab */}
+        <View style={styles.tabContent}>
           <FlatList
-            data={searchResults}
-            renderItem={renderSearchResult}
-            keyExtractor={(item) => item.id}
+            data={pendingRequests}
+            renderItem={renderPendingRequest}
+            keyExtractor={(item) => item.id.toString()}
             contentContainerStyle={styles.listContent}
-            ListEmptyComponent={
-              searchQuery.length >= 3
-                ? renderEmptySearch
-                : () => (
-                    <View style={styles.emptyState}>
-                      <IconSymbol name="magnifyingglass" size={64} color="rgba(255, 255, 255, 0.3)" />
-                      <Text style={styles.emptyTitle}>Search for friends</Text>
-                      <Text style={styles.emptyText}>
-                        Type at least 3 characters to search for users by username.
-                      </Text>
-                    </View>
-                  )
-            }
+            ListEmptyComponent={renderEmptyRequests}
+            refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refresh} tintColor="#fff" />}
           />
         </View>
-      )}
-
-      {activeTab === 'requests' && (
-        <FlatList
-          data={pendingRequests}
-          renderItem={renderPendingRequest}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContent}
-          ListEmptyComponent={renderEmptyRequests}
-          refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refresh} tintColor="#fff" />}
-        />
-      )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -664,6 +711,16 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 10,
     fontWeight: '600',
+  },
+  contentScrollView: {
+    flex: 1,
+  },
+  contentScrollViewContent: {
+    flexDirection: 'row',
+  },
+  tabContent: {
+    width: Dimensions.get('window').width,
+    flex: 1,
   },
   searchContainer: {
     flex: 1,

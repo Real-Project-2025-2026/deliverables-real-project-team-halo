@@ -7,6 +7,7 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
+  Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
@@ -254,7 +255,16 @@ export default function StartTripScreen() {
           {/* Connect with my Guardians */}
           <TouchableOpacity
             style={styles.guardianCard}
-            onPress={() => setShowGuardianSelector(!showGuardianSelector)}>
+            onPress={() => {
+              if (guardians.length === 0) {
+                Alert.alert(
+                  'No Guardians',
+                  'You need to add Guardians first. Go to the SafeTogether tab to add Guardians.'
+                );
+                return;
+              }
+              setShowGuardianSelector(true);
+            }}>
             <View style={styles.toggleIcon}>
               <IconSymbol name="person.2.fill" size={24} color="#fff" />
             </View>
@@ -269,29 +279,8 @@ export default function StartTripScreen() {
                 <Text style={styles.toggleSubtext}>No Guardians yet</Text>
               )}
             </View>
-            <IconSymbol
-              name={showGuardianSelector ? 'chevron.up' : 'chevron.down'}
-              size={20}
-              color="#fff"
-            />
+            <IconSymbol name="chevron.right" size={20} color="#fff" />
           </TouchableOpacity>
-
-          {/* Guardian Selection List */}
-          {showGuardianSelector && guardians.length > 0 && (
-            <View style={styles.guardianListContainer}>
-              <FlatList
-                data={guardians}
-                renderItem={renderGuardianItem}
-                keyExtractor={(item) => item.id.toString()}
-                scrollEnabled={false}
-                ListEmptyComponent={
-                  <Text style={styles.emptyGuardiansText}>
-                    No Guardians available. Add Guardians in the Safe Together tab.
-                  </Text>
-                }
-              />
-            </View>
-          )}
 
           {/* Connect with nearby users (secondary option) */}
           <TouchableOpacity
@@ -334,6 +323,55 @@ export default function StartTripScreen() {
           </TouchableOpacity>
         </BottomSheetScrollView>
       </BottomSheet>
+
+      {/* Guardian Selection Modal */}
+      <Modal
+        visible={showGuardianSelector}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowGuardianSelector(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Guardians</Text>
+              <TouchableOpacity
+                onPress={() => setShowGuardianSelector(false)}
+                style={styles.modalCloseButton}>
+                <IconSymbol name="xmark" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Guardian List */}
+            {guardians.length > 0 ? (
+              <FlatList
+                data={guardians}
+                renderItem={renderGuardianItem}
+                keyExtractor={(item) => item.id.toString()}
+                contentContainerStyle={styles.modalListContent}
+                showsVerticalScrollIndicator={false}
+              />
+            ) : (
+              <View style={styles.modalEmptyContainer}>
+                <IconSymbol name="person.2.fill" size={64} color="rgba(255, 255, 255, 0.3)" />
+                <Text style={styles.modalEmptyText}>
+                  No Guardians available
+                </Text>
+                <Text style={styles.modalEmptySubtext}>
+                  Add Guardians in the SafeTogether tab
+                </Text>
+              </View>
+            )}
+
+            {/* Done Button */}
+            <TouchableOpacity
+              style={styles.modalDoneButton}
+              onPress={() => setShowGuardianSelector(false)}>
+              <Text style={styles.modalDoneButtonText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </GestureHandlerRootView>
   );
 }
@@ -522,13 +560,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.7)',
     marginTop: 2,
   },
-  guardianListContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
-    maxHeight: 200,
-  },
   guardianItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -577,5 +608,74 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'center',
     padding: 12,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#5170FF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '80%',
+    paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalListContent: {
+    padding: 24,
+    paddingTop: 16,
+  },
+  modalEmptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 40,
+  },
+  modalEmptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  modalEmptySubtext: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+  },
+  modalDoneButton: {
+    backgroundColor: '#fff',
+    marginHorizontal: 24,
+    marginTop: 16,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalDoneButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#5170FF',
   },
 });
