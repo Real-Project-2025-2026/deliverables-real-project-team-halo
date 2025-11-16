@@ -1,24 +1,23 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  FlatList,
-  TextInput,
-  ActivityIndicator,
-  Alert,
-  SafeAreaView,
-  RefreshControl,
-} from 'react-native';
-import { Image } from 'expo-image';
-import { useLocalSearchParams, router } from 'expo-router';
-import { useAuth } from '@/providers/auth-provider';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useGuardian } from '@/hooks/use-guardian';
 import { useGuardianTrips } from '@/hooks/use-guardian-trips';
-import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useAuth } from '@/providers/auth-provider';
 import type { GuardianWithProfile, PublicUserProfile } from '@/services/guardian-service';
-import * as guardianService from '@/services/guardian-service';
+import { Image } from 'expo-image';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  RefreshControl,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 type TabType = 'guardians' | 'search' | 'requests';
 
