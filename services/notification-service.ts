@@ -11,6 +11,46 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Track if categories are registered to avoid duplicate registrations
+let categoriesRegistered = false;
+
+/**
+ * Register notification categories with actions
+ * This must be called once when the app starts
+ */
+export async function registerNotificationCategories(): Promise<void> {
+  // Avoid duplicate registrations
+  if (categoriesRegistered) {
+    return;
+  }
+
+  try {
+    // Register Check-in category with actions
+    await Notifications.setNotificationCategoryAsync('CHECKIN', [
+      {
+        identifier: 'CHECKIN_OK',
+        buttonTitle: "I'm OK",
+        options: {
+          opensAppToForeground: false, // Can stay in background
+        },
+      },
+      {
+        identifier: 'CHECKIN_HELP',
+        buttonTitle: 'Need Help',
+        options: {
+          opensAppToForeground: true, // Opens app for emergency
+        },
+      },
+    ]);
+
+    categoriesRegistered = true;
+    console.log('[Notification Service] Check-in category registered with actions');
+  } catch (error) {
+    console.error('[Notification Service] Error registering notification categories:', error);
+    throw error; // Re-throw to allow caller to handle
+  }
+}
+
 export interface NotificationServiceError {
   error: string;
   details?: unknown;
@@ -173,23 +213,34 @@ export async function sendCheckinNotification(checkinId: number): Promise<{
       return { error: permissionError };
     }
 
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "Are you okay?",
-        body: "Please confirm you're safe",
-        data: {
-          type: 'checkin',
-          checkinId,
-          actionRequired: true,
-        },
-        sound: true,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
+    // Ensure categories are registered BEFORE sending notification
+    await registerNotificationCategories();
+
+    const notificationContent = {
+      title: "Are you okay?",
+      body: "Please confirm you're safe",
+      data: {
+        type: 'checkin',
+        checkinId,
+        actionRequired: true,
       },
+      categoryIdentifier: 'CHECKIN', // Important: enables notification actions (note: categoryIdentifier, not categoryId!)
+      sound: true,
+      priority: Notifications.AndroidNotificationPriority.HIGH,
+    };
+
+    console.log('[Notification Service] Sending check-in notification with categoryIdentifier:', notificationContent.categoryIdentifier);
+
+    const notificationId = await Notifications.scheduleNotificationAsync({
+      content: notificationContent,
       trigger: null, // Send immediately
     });
 
+    console.log('[Notification Service] Check-in notification sent with ID:', notificationId);
+
     return { error: null };
   } catch (err) {
+    console.error('[Notification Service] Error sending check-in notification:', err);
     return {
       error: { error: 'Failed to send check-in notification', details: err },
     };

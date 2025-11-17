@@ -1,9 +1,9 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { useAuth } from '@/providers/auth-provider';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/providers/auth-provider';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -23,6 +23,13 @@ export default function ProfileScreen() {
   const [avatarUri, setAvatarUri] = useState<string | null>(profile?.avatar_url || null);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Update avatarUri when profile changes
+  useEffect(() => {
+    if (profile?.avatar_url) {
+      setAvatarUri(profile.avatar_url);
+    }
+  }, [profile?.avatar_url]);
 
   // Request permissions for image picker
   const requestImagePickerPermission = useCallback(async () => {
@@ -179,11 +186,12 @@ export default function ProfileScreen() {
   // Render avatar
   const renderAvatar = () => {
     const firstLetter = (username || fullName || user?.email || '?')[0].toUpperCase();
+    const avatarUrl = profile?.avatar_url || avatarUri;
 
-    if (avatarUri) {
+    if (avatarUrl) {
       return (
         <Image
-          source={{ uri: avatarUri }}
+          source={{ uri: avatarUrl }}
           style={styles.avatar}
           contentFit="cover"
           transition={200}
@@ -206,7 +214,7 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>My Profile</Text>
+          <Text style={styles.title}>Profile</Text>
         </View>
 
         {/* Avatar Section */}

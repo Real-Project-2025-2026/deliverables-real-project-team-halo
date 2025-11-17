@@ -5,6 +5,7 @@ import { useCheckinTimer } from '@/hooks/use-checkin-timer';
 import { useLocation } from '@/hooks/use-location';
 import { useTrip } from '@/hooks/use-trip';
 import { stopBackgroundLocationTracking } from '@/services/background-location';
+import * as checkinService from '@/services/checkin-service';
 import {
   sendCheckinNotification,
   sendEscalationNotification,
@@ -12,8 +13,8 @@ import {
 import * as routeService from '@/services/route-service';
 import * as tripService from '@/services/trip-service';
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
-import { router } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -63,6 +64,7 @@ export default function ActiveTripScreen() {
     timeUntilNextCheckin,
     missedCheckinsCount,
     respondToCheckin,
+    refreshPendingCheckin,
   } = useCheckinTimer({
     trip: activeTrip,
     isActive: !!activeTrip && activeTrip.status === 'active' && !isEscalated,
@@ -199,11 +201,50 @@ export default function ActiveTripScreen() {
   }, [activeTrip]);
 
   // Show check-in modal when pending check-in is created
+  // Also check if check-in is still pending before showing (in case it was answered via notification)
   useEffect(() => {
     if (pendingCheckin) {
-      setCheckinModalVisible(true);
+      // Verify the check-in is still pending before showing modal
+      const verifyAndShow = async () => {
+        if (!activeTrip) return;
+        
+        try {
+          const { data: pendingCheckins } = await checkinService.getPendingCheckins(activeTrip.id);
+          const isStillPending = pendingCheckins?.some(c => c.id === pendingCheckin.id);
+          
+          if (isStillPending) {
+            setCheckinModalVisible(true);
+          } else {
+            // Check-in was already answered (e.g., via notification), refresh state
+            console.log('[Active Trip] Check-in already answered, refreshing state');
+            await refreshPendingCheckin();
+            setCheckinModalVisible(false);
+          }
+        } catch (error) {
+          console.error('[Active Trip] Error verifying check-in status:', error);
+          // On error, show modal anyway (better safe than sorry)
+          setCheckinModalVisible(true);
+        }
+      };
+      
+      verifyAndShow();
+    } else {
+      // No pending check-in, close modal
+      setCheckinModalVisible(false);
     }
-  }, [pendingCheckin]);
+  }, [pendingCheckin, activeTrip, refreshPendingCheckin]);
+
+  // Refresh pending check-in state when screen comes into focus
+  // This ensures state is up-to-date if check-in was answered via notification
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTrip && !isEscalated) {
+        refreshPendingCheckin().catch((error) => {
+          console.error('[Active Trip] Error refreshing check-in on focus:', error);
+        });
+      }
+    }, [activeTrip, isEscalated, refreshPendingCheckin])
+  );
 
   async function handleRespondToCheckin(response: 'ok' | 'help') {
     await respondToCheckin(response);

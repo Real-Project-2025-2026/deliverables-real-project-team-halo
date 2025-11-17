@@ -10,6 +10,7 @@ interface UseCheckinTimerReturn {
   missedCheckinsCount: number;
   createNextCheckin: () => Promise<void>;
   respondToCheckin: (response: 'ok' | 'help') => Promise<void>;
+  refreshPendingCheckin: () => Promise<void>; // Refresh pending check-in state
 }
 
 interface UseCheckinTimerParams {
@@ -361,12 +362,17 @@ export function useCheckinTimer({
     }
   }
 
+  async function refreshPendingCheckin(): Promise<void> {
+    await loadPendingCheckins();
+  }
+
   return {
     pendingCheckin,
     timeUntilNextCheckin,
     missedCheckinsCount,
     createNextCheckin,
     respondToCheckin,
+    refreshPendingCheckin,
   };
 }
 

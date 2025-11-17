@@ -29,38 +29,46 @@ export function useGuardianTrips(): UseGuardianTripsReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent: boolean = false) => {
     if (!user) {
       setGuardianTrips([]);
       return;
     }
 
-    setIsLoading(true);
+    if (!silent) {
+      setIsLoading(true);
+    }
     setError(null);
     try {
       const { data, error: serviceError } = await tripService.getGuardianTrips();
 
       if (serviceError) {
-        setError(serviceError.error);
+        if (!silent) {
+          setError(serviceError.error);
+        }
         setGuardianTrips([]);
         return;
       }
 
       setGuardianTrips(data || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load guardian trips');
+      if (!silent) {
+        setError(err.message || 'Failed to load guardian trips');
+      }
       setGuardianTrips([]);
       console.error('Error loading guardian trips:', err);
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [user]);
 
   useEffect(() => {
-    refresh();
+    refresh(false); // Initial load should show loading
     
-    // Refresh every 5 seconds to get updates
-    const interval = setInterval(refresh, 5000);
+    // Refresh every 5 seconds silently (in background, no UI feedback)
+    const interval = setInterval(() => refresh(true), 5000);
     
     return () => clearInterval(interval);
   }, [user, refresh]);

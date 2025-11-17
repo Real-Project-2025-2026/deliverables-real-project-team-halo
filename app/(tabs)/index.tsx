@@ -6,20 +6,32 @@ import { useAuth } from '@/providers/auth-provider';
 import type { GuardianLocation } from '@/services/guardian-service';
 import { getGuardiansWithLocations } from '@/services/guardian-service';
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
+import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
   const { user, profile } = useAuth();
-  const { activeTrip } = useTrip();
+  const { activeTrip, refreshActiveTrip } = useTrip();
   const { location, getCurrentLocation, requestPermission, startWatchingLocation, stopWatchingLocation } = useLocation();
   const bottomSheetRef = useRef<BottomSheet>(null);
   const [guardianLocations, setGuardianLocations] = useState<GuardianLocation[]>([]);
 
   // Bottom sheet snap points
   const snapPoints = useMemo(() => ['25%', '50%', '85%'], []);
+
+  // Refresh active trip when screen comes into focus
+  // This ensures we show the correct state if user navigated back from active trip screen
+  useFocusEffect(
+    useCallback(() => {
+      refreshActiveTrip().catch((error) => {
+        console.error('[Home Screen] Error refreshing active trip on focus:', error);
+      });
+    }, [refreshActiveTrip])
+  );
 
   // Request location on mount and start watching
   useEffect(() => {
@@ -113,6 +125,29 @@ export default function HomeScreen() {
     }
   }, [requestPermission, getCurrentLocation]);
 
+  // Render avatar
+  const renderAvatar = () => {
+    const firstLetter = (profile?.username || profile?.full_name || user?.email || '?')[0].toUpperCase();
+    const avatarUrl = profile?.avatar_url;
+
+    if (avatarUrl) {
+      return (
+        <Image
+          source={{ uri: avatarUrl }}
+          style={styles.userAvatarImage}
+          contentFit="cover"
+          transition={200}
+        />
+      );
+    }
+
+    return (
+      <View style={[styles.userAvatarContainer, styles.userAvatarPlaceholder]}>
+        <Text style={styles.userAvatarText}>{firstLetter}</Text>
+      </View>
+    );
+  };
+
   return (
     <GestureHandlerRootView style={styles.container}>
       {/* Map Background */}
@@ -135,6 +170,14 @@ export default function HomeScreen() {
         }))}
         onLocationButtonPress={handleLocationButtonPress}
       />
+
+      {/* Avatar Button */}
+      <TouchableOpacity
+        style={styles.avatarButton}
+        onPress={() => router.push('/(tabs)/profile')}
+        activeOpacity={0.7}>
+        {renderAvatar()}
+      </TouchableOpacity>
 
       {/* Bottom Sheet */}
       <BottomSheet
@@ -231,6 +274,45 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  avatarButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  userAvatarContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userAvatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  userAvatarPlaceholder: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  userAvatarText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
   },
   bottomSheetBackground: {
     backgroundColor: '#5170FF',

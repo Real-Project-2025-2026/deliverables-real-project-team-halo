@@ -3,9 +3,34 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/providers/auth-provider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Image } from 'expo-image';
+import { useCallback } from 'react';
 
 export default function SettingsScreen() {
   const { user, profile, signOut } = useAuth();
+
+  // Render user avatar (for header)
+  const renderUserAvatar = useCallback(() => {
+    const firstLetter = (profile?.username || profile?.full_name || user?.email || '?')[0].toUpperCase();
+    const avatarUrl = profile?.avatar_url;
+
+    if (avatarUrl) {
+      return (
+        <Image
+          source={{ uri: avatarUrl }}
+          style={styles.userAvatarImage}
+          contentFit="cover"
+          transition={200}
+        />
+      );
+    }
+
+    return (
+      <View style={[styles.userAvatarContainer, styles.userAvatarPlaceholder]}>
+        <Text style={styles.userAvatarText}>{firstLetter}</Text>
+      </View>
+    );
+  }, [profile, user]);
 
   function handleSignOut() {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -25,6 +50,14 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.userAvatarContainer}
+            onPress={() => router.push('/(tabs)/profile')}
+            activeOpacity={0.7}>
+            {renderUserAvatar()}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView 
@@ -151,12 +184,45 @@ const styles = StyleSheet.create({
     backgroundColor: '#5170FF',
   },
   header: {
-    padding: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 20,
     paddingBottom: 16,
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
+    color: '#fff',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  userAvatarContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userAvatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  userAvatarPlaceholder: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  userAvatarText: {
+    fontSize: 18,
+    fontWeight: '600',
     color: '#fff',
   },
   scrollView: {

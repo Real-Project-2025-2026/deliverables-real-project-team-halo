@@ -42,6 +42,8 @@ export function useTrip(): UseTripReturn {
     } else {
       setActiveTrip(null);
     }
+    // Note: refreshActiveTrip is stable (useCallback), so it's safe to include
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const refreshActiveTrip = useCallback(async () => {

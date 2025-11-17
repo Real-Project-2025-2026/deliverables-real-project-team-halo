@@ -20,11 +20,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 
 type TabType = 'guardians' | 'search' | 'requests';
 
 export default function SafeTogetherScreen() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const params = useLocalSearchParams<{ tab?: string }>();
   const {
     guardians,
@@ -46,6 +47,7 @@ export default function SafeTogetherScreen() {
     isLoading: isLoadingTrips,
     refresh: refreshTrips,
   } = useGuardianTrips();
+
 
   // Initialize activeTab from URL params or default
   const [activeTab, setActiveTab] = useState<TabType>(
@@ -211,6 +213,29 @@ export default function SafeTogetherScreen() {
     [user]
   );
 
+  // Render user avatar (for header)
+  const renderUserAvatar = useCallback(() => {
+    const firstLetter = (profile?.username || profile?.full_name || user?.email || '?')[0].toUpperCase();
+    const avatarUrl = profile?.avatar_url;
+
+    if (avatarUrl) {
+      return (
+        <Image
+          source={{ uri: avatarUrl }}
+          style={styles.userAvatarImage}
+          contentFit="cover"
+          transition={200}
+        />
+      );
+    }
+
+    return (
+      <View style={[styles.userAvatarContainer, styles.userAvatarPlaceholder]}>
+        <Text style={styles.userAvatarText}>{firstLetter}</Text>
+      </View>
+    );
+  }, [profile, user]);
+
   // Render avatar or placeholder
   const renderAvatar = useCallback(
     (profile: { avatar_url: string | null; username: string | null; full_name: string | null }) => {
@@ -313,29 +338,46 @@ export default function SafeTogetherScreen() {
     [renderAvatar]
   );
 
-  // Render Guardian item
+  // Render Guardian item with swipe-to-delete
   const renderGuardian = useCallback(
     ({ item }: { item: GuardianWithProfile }) => {
       const otherUser = getOtherUser(item);
       const displayName = otherUser.full_name || otherUser.username || 'Unknown';
+      let swipeableRef: Swipeable | null = null;
 
-      return (
-        <View style={styles.guardianCard}>
-          {renderAvatar(otherUser)}
-          <View style={styles.guardianInfo}>
-            <Text style={styles.guardianUsername}>
-              @{otherUser.username || 'unknown'}
-            </Text>
-            {otherUser.full_name && (
-              <Text style={styles.guardianName}>{displayName}</Text>
-            )}
-          </View>
+      const renderRightActions = () => (
+        <View style={styles.deleteActionContainer}>
           <TouchableOpacity
-            style={styles.removeButton}
-            onPress={() => handleRemoveGuardian(item.id, otherUser.username || 'user')}>
-            <IconSymbol name="xmark.circle.fill" size={24} color="#FF3B30" />
+            style={styles.deleteAction}
+            onPress={async () => {
+              swipeableRef?.close();
+              await handleRemoveGuardian(item.id, otherUser.username || 'user');
+            }}>
+            <Text style={styles.deleteActionText}>Delete</Text>
           </TouchableOpacity>
         </View>
+      );
+
+      return (
+        <Swipeable
+          ref={(ref) => {
+            swipeableRef = ref;
+          }}
+          renderRightActions={renderRightActions}
+          overshootRight={false}
+          friction={2}>
+          <View style={styles.guardianCard}>
+            {renderAvatar(otherUser)}
+            <View style={styles.guardianInfo}>
+              <Text style={styles.guardianUsername}>
+                @{otherUser.username || 'unknown'}
+              </Text>
+              {otherUser.full_name && (
+                <Text style={styles.guardianName}>{displayName}</Text>
+              )}
+            </View>
+          </View>
+        </Swipeable>
       );
     },
     [getOtherUser, renderAvatar, handleRemoveGuardian]
@@ -485,15 +527,24 @@ export default function SafeTogetherScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <GestureHandlerRootView style={styles.container}>
+      <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>My Guardians</Text>
-        {pendingRequests.length > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{pendingRequests.length}</Text>
-          </View>
-        )}
+        <View style={styles.headerRight}>
+          {pendingRequests.length > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{pendingRequests.length}</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.userAvatarContainer}
+            onPress={() => router.push('/(tabs)/profile')}
+            activeOpacity={0.7}>
+            {renderUserAvatar()}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Tabs */}
@@ -558,16 +609,22 @@ export default function SafeTogetherScreen() {
 
             {/* Guardians List */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>My Guardians</Text>
               <FlatList
                 data={guardians}
                 renderItem={renderGuardian}
                 keyExtractor={(item) => item.id.toString()}
-                contentContainerStyle={styles.listContent}
+                contentContainerStyle={[
+                  styles.listContent,
+                  guardians.length === 0 && styles.listContentEmpty,
+                ]}
                 ListEmptyComponent={renderEmptyGuardians}
+                removeClippedSubviews={false}
+                maintainVisibleContentPosition={{
+                  minIndexForVisible: 0,
+                }}
                 refreshControl={
                   <RefreshControl
-                    refreshing={isLoading || isLoadingTrips}
+                    refreshing={isLoading}
                     onRefresh={() => {
                       refresh();
                       refreshTrips();
@@ -632,7 +689,8 @@ export default function SafeTogetherScreen() {
           />
         </View>
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
@@ -654,6 +712,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   badge: {
     backgroundColor: '#FF3B30',
     borderRadius: 12,
@@ -667,6 +730,30 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '600',
+  },
+  userAvatarContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userAvatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  userAvatarPlaceholder: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  userAvatarText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
   },
   tabs: {
     flexDirection: 'row',
@@ -832,6 +919,10 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 24,
     paddingBottom: 24,
+    flexGrow: 1,
+  },
+  listContentEmpty: {
+    flexGrow: 1,
   },
   guardianCard: {
     flexDirection: 'row',
@@ -857,8 +948,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
   },
-  removeButton: {
-    padding: 4,
+  deleteActionContainer: {
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    paddingRight: 24,
+  },
+  deleteAction: {
+    backgroundColor: '#FF3B30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+    borderRadius: 12,
+  },
+  deleteActionText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   searchCard: {
     flexDirection: 'row',

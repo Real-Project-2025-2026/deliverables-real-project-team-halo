@@ -8,8 +8,10 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { Picker } from '@react-native-picker/picker';
 import { router } from 'expo-router';
 import { useTrip } from '@/hooks/use-trip';
 import { useLocation } from '@/hooks/use-location';
@@ -31,7 +33,9 @@ export default function StartTripScreen() {
   const bottomSheetRef = useRef<BottomSheet>(null);
 
   const [selectedMode, setSelectedMode] = useState<TripMode>('interval');
-  const [checkinInterval, setCheckinInterval] = useState(5);
+  const [checkinInterval, setCheckinInterval] = useState<number | 'custom'>(5);
+  const [customIntervalValue, setCustomIntervalValue] = useState<number>(15);
+  const [showCustomPickerModal, setShowCustomPickerModal] = useState(false);
   const [safetogetherEnabled, setSafetogetherEnabled] = useState(false);
   const [selectedGuardians, setSelectedGuardians] = useState<string[]>([]);
   const [showGuardianSelector, setShowGuardianSelector] = useState(false);
@@ -57,9 +61,15 @@ export default function StartTripScreen() {
         return;
       }
 
+      // Determine the actual interval value
+      let actualInterval = checkinInterval;
+      if (checkinInterval === 'custom') {
+        actualInterval = customIntervalValue;
+      }
+
       const { success, trip, error } = await startTrip({
         mode: selectedMode,
-        checkinIntervalMinutes: checkinInterval,
+        checkinIntervalMinutes: actualInterval as number,
         safetogetherEnabled,
         guardianIds: selectedGuardians.length > 0 ? selectedGuardians : undefined,
         originLatitude: currentLocation.coords.latitude,
@@ -92,7 +102,7 @@ export default function StartTripScreen() {
     { value: 'continuous', label: 'Continuous', icon: 'location.fill' },
   ];
 
-  const intervals = [3, 5, 7, 10];
+  const intervals: (number | 'custom')[] = [3, 5, 10, 'custom'];
 
   // Get the other user from a Guardian relationship
   const getOtherUser = useCallback(
@@ -235,13 +245,22 @@ export default function StartTripScreen() {
                       styles.intervalButton,
                       checkinInterval === interval && styles.intervalButtonSelected,
                     ]}
-                    onPress={() => setCheckinInterval(interval)}>
+                    onPress={() => {
+                      if (interval === 'custom') {
+                        setShowCustomPickerModal(true);
+                        setCheckinInterval('custom');
+                      } else {
+                        setCheckinInterval(interval);
+                      }
+                    }}>
                     <Text
                       style={[
                         styles.intervalText,
                         checkinInterval === interval && styles.intervalTextSelected,
                       ]}>
-                      {interval}m
+                      {interval === 'custom' 
+                        ? (checkinInterval === 'custom' ? `${customIntervalValue}m` : 'Custom')
+                        : `${interval}m`}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -371,6 +390,44 @@ export default function StartTripScreen() {
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* Custom Interval Picker Modal */}
+      <Modal
+        visible={showCustomPickerModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCustomPickerModal(false)}>
+        <TouchableOpacity
+          style={styles.pickerModalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowCustomPickerModal(false)}>
+          <View style={styles.pickerModalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerModalHeader}>
+              <Text style={styles.pickerModalTitle}>Select Minutes</Text>
+              <TouchableOpacity
+                onPress={() => setShowCustomPickerModal(false)}
+                style={styles.pickerModalDoneButton}>
+                <Text style={styles.pickerModalDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.pickerModalPickerWrapper}>
+              <Picker
+                selectedValue={customIntervalValue}
+                onValueChange={(itemValue) => setCustomIntervalValue(itemValue)}
+                style={styles.pickerModalPicker}
+                itemStyle={Platform.OS === 'ios' ? styles.pickerModalItemIOS : undefined}>
+                {Array.from({ length: 60 }, (_, i) => i + 1).map((value) => (
+                  <Picker.Item
+                    key={value}
+                    label={value.toString()}
+                    value={value}
+                  />
+                ))}
+              </Picker>
+            </View>
+          </View>
+        </TouchableOpacity>
       </Modal>
     </GestureHandlerRootView>
   );
@@ -677,5 +734,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#5170FF',
+  },
+  pickerModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24, // Safe area for iOS
+  },
+  pickerModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  pickerModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000',
+  },
+  pickerModalDoneButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  pickerModalDoneText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#5170FF',
+  },
+  pickerModalPickerWrapper: {
+    height: 216, // Standard iOS picker height
+    overflow: 'hidden',
+  },
+  pickerModalPicker: {
+    height: 216,
+    width: '100%',
+  },
+  pickerModalItemIOS: {
+    color: '#000',
   },
 });
