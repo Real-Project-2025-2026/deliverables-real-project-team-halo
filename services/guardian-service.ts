@@ -36,6 +36,16 @@ export interface GuardianServiceError {
   details?: unknown;
 }
 
+export interface GuardianLocation {
+  id: string;
+  latitude: number;
+  longitude: number;
+  avatarUrl: string | null;
+  username: string | null;
+  fullName: string | null;
+  lastLocationUpdateAt: string | null;
+}
+
 /**
  * Search for users by username or email (for Guardian requests)
  * Returns users with public profile info (id, username, full_name, avatar_url)
@@ -523,6 +533,95 @@ export async function getGuardianRelationship(
     return {
       data: null,
       error: { error: 'Failed to get Guardian relationship', details: err },
+    };
+  }
+}
+
+/**
+ * Get all Guardians with their current locations (from active trips)
+ * Returns Guardians that have an active trip with location data
+ */
+export async function getGuardiansWithLocations(): Promise<{
+  data: GuardianLocation[] | null;
+  error: GuardianServiceError | null;
+}> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user) {
+      return { data: null, error: { error: 'Not authenticated' } };
+    }
+
+    // Get all accepted Guardians
+    const { data: guardians, error: guardiansError } = await getMyGuardians();
+
+    if (guardiansError || !guardians) {
+      return { data: null, error: guardiansError || { error: 'Failed to get Guardians' } };
+    }
+
+    // Get Guardian IDs (both requester and recipient)
+    const guardianIds = guardians
+      .map((g) => {
+        // Return the other user's ID (not the current user's)
+        if (g.requester_id === session.user.id) {
+          return g.recipient_id;
+        } else {
+          return g.requester_id;
+        }
+      })
+      .filter((id): id is string => id !== undefined);
+
+    if (guardianIds.length === 0) {
+      return { data: [], error: null };
+    }
+
+    // Get active trips for all Guardians with location data
+    const { data: activeTrips, error: tripsError } = await supabase
+      .from('trips')
+      .select(
+        `
+        id,
+        user_id,
+        last_known_latitude,
+        last_known_longitude,
+        last_location_update_at,
+        profiles!trips_user_id_fkey(id, username, full_name, avatar_url)
+      `
+      )
+      .in('user_id', guardianIds)
+      .in('status', ['active', 'escalated'])
+      .not('last_known_latitude', 'is', null)
+      .not('last_known_longitude', 'is', null);
+
+    if (tripsError) {
+      return { data: null, error: { error: tripsError.message, details: tripsError } };
+    }
+
+    // Map trips to GuardianLocation format
+    const guardianLocations: GuardianLocation[] = (activeTrips || [])
+      .map((trip: any) => {
+        const profile = trip.profiles;
+        if (!profile) return null;
+
+        return {
+          id: profile.id,
+          latitude: trip.last_known_latitude,
+          longitude: trip.last_known_longitude,
+          avatarUrl: profile.avatar_url,
+          username: profile.username,
+          fullName: profile.full_name,
+          lastLocationUpdateAt: trip.last_location_update_at,
+        };
+      })
+      .filter((loc: GuardianLocation | null): loc is GuardianLocation => loc !== null);
+
+    return { data: guardianLocations, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: { error: 'Failed to get Guardians with locations', details: err },
     };
   }
 }

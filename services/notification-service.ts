@@ -466,6 +466,133 @@ export async function sendGuardianAcceptedNotification(
 }
 
 /**
+ * Send a Guardian trip ended notification
+ * Notifies Guardians when someone they're guarding completes a trip
+ */
+export async function sendGuardianTripEndNotification(
+  guardianPushToken: string,
+  userName: string,
+  userUsername: string,
+  tripId: number,
+  destination?: string
+): Promise<{ error: NotificationServiceError | null }> {
+  try {
+    if (!guardianPushToken) {
+      return { error: { error: 'No push token available for Guardian' } };
+    }
+
+    const destinationText = destination ? ` and arrived at ${destination}` : '';
+    const message = {
+      to: guardianPushToken,
+      sound: 'default',
+      title: 'Guardian Trip Completed',
+      body: `${userName || userUsername} has safely completed their trip${destinationText}`,
+      data: {
+        type: 'guardian_trip_ended',
+        tripId,
+        actionRequired: false,
+      },
+      priority: 'default',
+      channelId: Platform.OS === 'android' ? 'checkin' : undefined,
+    };
+
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
+    });
+
+    const result = await response.json();
+
+    if (result.errors && result.errors.length > 0) {
+      return {
+        error: {
+          error: 'Failed to send Guardian trip end notification',
+          details: result.errors,
+        },
+      };
+    }
+
+    return { error: null };
+  } catch (err) {
+    return {
+      error: { error: 'Failed to send Guardian trip end notification', details: err },
+    };
+  }
+}
+
+/**
+ * Send a Guardian escalation notification
+ * Notifies Guardians when someone they're guarding has missed check-ins and needs help
+ */
+export async function sendGuardianEscalationNotification(
+  guardianPushToken: string,
+  userName: string,
+  userUsername: string,
+  tripId: number,
+  location?: { latitude: number; longitude: number }
+): Promise<{ error: NotificationServiceError | null }> {
+  try {
+    if (!guardianPushToken) {
+      return { error: { error: 'No push token available for Guardian' } };
+    }
+
+    let body = `🚨 EMERGENCY: ${userName || userUsername} has missed multiple check-ins and may need help.`;
+    
+    if (location) {
+      const locationUrl = `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+      body += ` Last known location: ${locationUrl}`;
+    }
+
+    const message = {
+      to: guardianPushToken,
+      sound: 'default',
+      title: '🚨 Guardian Emergency Alert',
+      body,
+      data: {
+        type: 'guardian_escalation',
+        tripId,
+        location,
+        actionRequired: true,
+      },
+      priority: 'high',
+      channelId: Platform.OS === 'android' ? 'emergency' : undefined,
+    };
+
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
+    });
+
+    const result = await response.json();
+
+    if (result.errors && result.errors.length > 0) {
+      return {
+        error: {
+          error: 'Failed to send Guardian escalation notification',
+          details: result.errors,
+        },
+      };
+    }
+
+    return { error: null };
+  } catch (err) {
+    return {
+      error: { error: 'Failed to send Guardian escalation notification', details: err },
+    };
+  }
+}
+
+/**
  * Get push token from recipient (from profiles table)
  */
 export async function getRecipientPushToken(recipientId: string): Promise<string | null> {

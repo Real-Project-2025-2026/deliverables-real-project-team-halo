@@ -50,6 +50,25 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
             })
             .eq('id', tripId);
 
+          // Record route point (non-blocking)
+          try {
+            const { recordRoutePoint } = await import('@/services/route-service');
+            await recordRoutePoint(tripId, location.coords.latitude, location.coords.longitude, {
+              accuracy: location.coords.accuracy ?? undefined,
+              altitude: location.coords.altitude ?? undefined,
+              heading: location.coords.heading !== null && location.coords.heading !== undefined 
+                ? location.coords.heading 
+                : undefined,
+              speed: location.coords.speed !== null && location.coords.speed !== undefined
+                ? location.coords.speed
+                : undefined,
+            }).catch((err) => {
+              console.warn('Error recording route point in background (non-blocking):', err);
+            });
+          } catch (err) {
+            console.warn('Error importing route-service (non-blocking):', err);
+          }
+
           // Update nearby presence if SafeTogether is enabled
           const { data: trip } = await supabase
             .from('trips')

@@ -3,9 +3,11 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useLocation } from '@/hooks/use-location';
 import { useTrip } from '@/hooks/use-trip';
 import { useAuth } from '@/providers/auth-provider';
+import type { GuardianLocation } from '@/services/guardian-service';
+import { getGuardiansWithLocations } from '@/services/guardian-service';
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
@@ -14,6 +16,7 @@ export default function HomeScreen() {
   const { activeTrip } = useTrip();
   const { location, getCurrentLocation, requestPermission, startWatchingLocation, stopWatchingLocation } = useLocation();
   const bottomSheetRef = useRef<BottomSheet>(null);
+  const [guardianLocations, setGuardianLocations] = useState<GuardianLocation[]>([]);
 
   // Bottom sheet snap points
   const snapPoints = useMemo(() => ['25%', '50%', '85%'], []);
@@ -39,6 +42,27 @@ export default function HomeScreen() {
     return () => {
       stopWatchingLocation();
     };
+  }, []);
+
+  // Load Guardian locations
+  useEffect(() => {
+    const loadGuardianLocations = async () => {
+      const { data, error } = await getGuardiansWithLocations();
+      if (error) {
+        console.error('Error loading Guardian locations:', error);
+        return;
+      }
+      if (data) {
+        setGuardianLocations(data);
+      }
+    };
+
+    loadGuardianLocations();
+
+    // Refresh Guardian locations every 30 seconds
+    const interval = setInterval(loadGuardianLocations, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   function handleStartTrip() {
@@ -101,6 +125,14 @@ export default function HomeScreen() {
               }
             : undefined
         }
+        guardians={guardianLocations.map((g) => ({
+          id: g.id,
+          latitude: g.latitude,
+          longitude: g.longitude,
+          avatarUrl: g.avatarUrl,
+          username: g.username,
+          fullName: g.fullName,
+        }))}
         onLocationButtonPress={handleLocationButtonPress}
       />
 

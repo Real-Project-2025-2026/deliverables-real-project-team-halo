@@ -425,6 +425,57 @@ export async function completeTrip(
       // Don't fail trip completion if notification fails
     }
 
+    // Notify Guardians (non-blocking - don't fail trip completion)
+    try {
+      const { getPushTokenForUser, sendGuardianTripEndNotification } = await import(
+        '@/services/notification-service'
+      );
+
+      // Get Guardians for this trip
+      const { data: tripGuardians, error: guardiansError } = await supabase
+        .from('trip_guardians')
+        .select('guardian_id')
+        .eq('trip_id', tripId);
+
+      if (guardiansError) {
+        console.warn('Error fetching trip guardians for notification:', guardiansError);
+      } else if (tripGuardians && tripGuardians.length > 0) {
+        const userUsername = (await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', session.user.id)
+          .single()).data?.username || null;
+
+        // Notify each Guardian
+        const guardianNotifications = tripGuardians.map(async (tg) => {
+          try {
+            const pushToken = await getPushTokenForUser(tg.guardian_id);
+            if (pushToken) {
+              await sendGuardianTripEndNotification(
+                pushToken,
+                userName,
+                userUsername || 'Someone',
+                tripId,
+                destination !== 'their destination' ? destination : undefined
+              ).catch((err) => {
+                console.error(`Error notifying Guardian ${tg.guardian_id}:`, err);
+                // Don't fail if one Guardian notification fails
+              });
+            }
+          } catch (err) {
+            console.error(`Error getting push token for Guardian ${tg.guardian_id}:`, err);
+            // Don't fail if one Guardian notification fails
+          }
+        });
+
+        // Wait for all notifications (but don't fail trip completion)
+        await Promise.allSettled(guardianNotifications);
+      }
+    } catch (err) {
+      console.error('Error notifying Guardians on trip end:', err);
+      // Don't fail trip completion if Guardian notifications fail
+    }
+
     return { error: null };
   } catch (err) {
     return { error: { error: 'Failed to complete trip', details: err } };
@@ -655,6 +706,65 @@ export async function escalateTrip(
     } catch (err) {
       console.error('Error notifying emergency contacts on escalation:', err);
       // Don't fail escalation if notification fails
+    }
+
+    // Notify Guardians (non-blocking - don't fail escalation)
+    try {
+      const { getPushTokenForUser, sendGuardianEscalationNotification } = await import(
+        '@/services/notification-service'
+      );
+
+      // Get Guardians for this trip
+      const { data: tripGuardians, error: guardiansError } = await supabase
+        .from('trip_guardians')
+        .select('guardian_id')
+        .eq('trip_id', tripId);
+
+      if (guardiansError) {
+        console.warn('Error fetching trip guardians for notification:', guardiansError);
+      } else if (tripGuardians && tripGuardians.length > 0) {
+        const userUsername = (await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', session.user.id)
+          .single()).data?.username || null;
+
+        const location =
+          trip?.last_known_latitude && trip?.last_known_longitude
+            ? {
+                latitude: trip.last_known_latitude,
+                longitude: trip.last_known_longitude,
+              }
+            : undefined;
+
+        // Notify each Guardian
+        const guardianNotifications = tripGuardians.map(async (tg) => {
+          try {
+            const pushToken = await getPushTokenForUser(tg.guardian_id);
+            if (pushToken) {
+              await sendGuardianEscalationNotification(
+                pushToken,
+                userName,
+                userUsername || 'Someone',
+                tripId,
+                location
+              ).catch((err) => {
+                console.error(`Error notifying Guardian ${tg.guardian_id}:`, err);
+                // Don't fail if one Guardian notification fails
+              });
+            }
+          } catch (err) {
+            console.error(`Error getting push token for Guardian ${tg.guardian_id}:`, err);
+            // Don't fail if one Guardian notification fails
+          }
+        });
+
+        // Wait for all notifications (but don't fail escalation)
+        await Promise.allSettled(guardianNotifications);
+      }
+    } catch (err) {
+      console.error('Error notifying Guardians on escalation:', err);
+      // Don't fail escalation if Guardian notifications fail
     }
 
     return { error: null };

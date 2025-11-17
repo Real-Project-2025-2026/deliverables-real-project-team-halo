@@ -1,12 +1,23 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Image as ExpoImage } from 'expo-image';
 import { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
+
+interface GuardianMarker {
+  id: string;
+  latitude: number;
+  longitude: number;
+  avatarUrl: string | null;
+  username: string | null;
+  fullName: string | null;
+}
 
 interface MapViewWrapperProps {
   userLocation?: { latitude: number; longitude: number };
   destination?: { latitude: number; longitude: number };
   routePoints?: Array<{ latitude: number; longitude: number }>;
+  guardians?: GuardianMarker[];
   onLocationButtonPress?: () => void;
 }
 
@@ -14,6 +25,7 @@ export function MapViewWrapper({
   userLocation,
   destination,
   routePoints = [],
+  guardians = [],
   onLocationButtonPress,
 }: MapViewWrapperProps) {
   const mapRef = useRef<MapView>(null);
@@ -229,6 +241,32 @@ export function MapViewWrapper({
             title="Destination"
           />
         )}
+
+        {/* Guardian markers with avatars */}
+        {guardians.map((guardian) => (
+          <Marker
+            key={guardian.id}
+            coordinate={{
+              latitude: guardian.latitude,
+              longitude: guardian.longitude,
+            }}
+            title={guardian.fullName || guardian.username || 'Guardian'}>
+            <View style={styles.guardianMarker}>
+              {guardian.avatarUrl ? (
+                <ExpoImage
+                  source={{ uri: guardian.avatarUrl }}
+                  style={styles.guardianAvatar}
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={[styles.guardianAvatar, styles.guardianAvatarPlaceholder]}>
+                  <IconSymbol name="person.fill" size={20} color="#fff" />
+                </View>
+              )}
+              <View style={styles.guardianMarkerDot} />
+            </View>
+          </Marker>
+        ))}
       </MapView>
       
       {/* Custom Location Button - positioned above bottom sheet */}
@@ -259,5 +297,36 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  guardianMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guardianAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 3,
+    borderColor: '#fff',
+    backgroundColor: '#5170FF',
+  },
+  guardianAvatarPlaceholder: {
+    backgroundColor: '#5170FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  guardianMarkerDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#5170FF',
+    borderWidth: 2,
+    borderColor: '#fff',
+    marginTop: -6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
   },
 });

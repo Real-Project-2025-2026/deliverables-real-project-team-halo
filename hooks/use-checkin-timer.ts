@@ -194,6 +194,18 @@ export function useCheckinTimer({
       // Setup timeouts for this check-in
       setupCheckinTimeouts(checkin);
 
+      // Send push notification for check-in
+      try {
+        const { sendCheckinNotification } = await import('@/services/notification-service');
+        await sendCheckinNotification(checkin.id).catch((err) => {
+          console.warn('Error sending check-in notification:', err);
+          // Don't fail check-in creation if notification fails
+        });
+      } catch (err) {
+        console.warn('Error importing notification service:', err);
+        // Don't fail check-in creation if notification import fails
+      }
+
       // Notify callback
       onCheckinCreated?.(checkin);
 
