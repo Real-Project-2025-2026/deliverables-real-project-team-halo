@@ -169,13 +169,13 @@ export default function TripSetupScreen() {
 
       const { data, error } = await startTrip({
         mode: selectedMode,
-        checkinInterval: typeof actualInterval === 'number' ? actualInterval : 5,
+        checkinIntervalMinutes: typeof actualInterval === 'number' ? actualInterval : 5,
         safetogetherEnabled: false,
-        originLat: origin.latitude,
-        originLng: origin.longitude,
+        originLatitude: origin.latitude,
+        originLongitude: origin.longitude,
         originAddress: origin.formattedAddress,
-        destinationLat: destination.latitude,
-        destinationLng: destination.longitude,
+        destinationLatitude: destination.latitude,
+        destinationLongitude: destination.longitude,
         destinationAddress: destination.formattedAddress,
         guardianIds: selectedGuardians.length > 0 ? selectedGuardians : undefined,
       });

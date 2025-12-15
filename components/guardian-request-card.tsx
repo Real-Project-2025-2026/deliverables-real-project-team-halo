@@ -77,17 +77,6 @@ export function GuardianRequestCard({
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.iconContainer}>
-          <IconSymbol name="shield.fill" size={20} color={colors.primary[500]} />
-        </View>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Guardian-Anfrage</Text>
-          <Text style={styles.timestamp}>{getTimeAgo(request.created_at)}</Text>
-        </View>
-      </View>
-
       {/* Requester Info */}
       <View style={styles.requesterContainer}>
         <View style={styles.avatar}>

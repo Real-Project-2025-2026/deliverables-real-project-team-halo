@@ -623,7 +623,7 @@ export default function ActiveTripScreen() {
       </SafeAreaView>
 
       {/* Bottom Sheet with Swipeable Pages */}
-      <SafeAreaView style={styles.bottomSheet} edges={['bottom']}>
+      <View style={styles.bottomSheet}>
         <View style={styles.handleContainer}>
           <View style={styles.handle} />
         </View>
@@ -698,38 +698,6 @@ export default function ActiveTripScreen() {
               </View>
             )}
 
-            {/* Trip Stats */}
-            <View style={styles.statsContainer}>
-              <View style={styles.statCard}>
-                <IconSymbol name="figure.walk" size={20} color={colors.primary[500]} />
-                <View style={styles.statContent}>
-                  <Text style={styles.statValue}>
-                    {routeDistance >= 1000
-                      ? `${(routeDistance / 1000).toFixed(1)} km`
-                      : `${Math.round(routeDistance)} m`}
-                  </Text>
-                  <Text style={styles.statLabel}>Distanz</Text>
-                </View>
-              </View>
-              
-              <View style={styles.statCard}>
-                <IconSymbol name="shield.fill" size={20} color={colors.success.main} />
-                <View style={styles.statContent}>
-                  <Text style={styles.statValue}>
-                    {activeTrip.mode === 'interval' ? `${activeTrip.checkin_interval_minutes}m` : 
-                     activeTrip.mode === 'silent' ? 'Aus' : 'Aktiv'}
-                  </Text>
-                  <Text style={styles.statLabel}>Intervall</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Swipe Hint */}
-            <View style={styles.swipeHint}>
-              <IconSymbol name="chevron.right.2" size={16} color={colors.text.tertiary} />
-              <Text style={styles.swipeHintText}>Wische für SOS</Text>
-            </View>
-
             {/* Action Buttons */}
             <View style={styles.actionsContainer}>
               {!isEscalated && (
@@ -793,68 +761,6 @@ export default function ActiveTripScreen() {
               />
             </View>
 
-            {/* Trip Info Cards */}
-            <View style={styles.infoCardsContainer}>
-              {/* Guardian Info */}
-              {activeTrip.safetogether_enabled && (
-                <View style={styles.infoCard}>
-                  <View style={styles.infoCardIcon}>
-                    <IconSymbol name="person.2.fill" size={18} color={colors.primary[500]} />
-                  </View>
-                  <View style={styles.infoCardContent}>
-                    <Text style={styles.infoCardTitle}>Guardian aktiv</Text>
-                    <Text style={styles.infoCardSubtitle}>Begleitet deinen Trip</Text>
-                  </View>
-                  <View style={[styles.statusDotSmall, { backgroundColor: colors.success.main }]} />
-                </View>
-              )}
-
-              {/* Missed Check-ins Warning */}
-              {missedCheckinsCount > 0 && (
-                <View style={[styles.infoCard, styles.infoCardWarning]}>
-                  <View style={[styles.infoCardIcon, { backgroundColor: colors.error.light }]}>
-                    <IconSymbol name="exclamationmark.triangle.fill" size={18} color={colors.error.main} />
-                  </View>
-                  <View style={styles.infoCardContent}>
-                    <Text style={[styles.infoCardTitle, { color: colors.error.main }]}>
-                      {missedCheckinsCount} Check-in verpasst
-                    </Text>
-                    <Text style={styles.infoCardSubtitle}>Bitte checke bald ein</Text>
-                  </View>
-                </View>
-              )}
-
-              {/* Route Info */}
-              <View style={styles.infoCard}>
-                <View style={styles.infoCardIcon}>
-                  <IconSymbol name="location.fill" size={18} color={colors.success.main} />
-                </View>
-                <View style={styles.infoCardContent}>
-                  <Text style={styles.infoCardTitle}>
-                    {activeTrip.destination_address 
-                      ? activeTrip.destination_address.split(',')[0] 
-                      : 'Ziel'}
-                  </Text>
-                  <Text style={styles.infoCardSubtitle}>
-                    {routeDistance >= 1000
-                      ? `${(routeDistance / 1000).toFixed(1)} km zurückgelegt`
-                      : `${Math.round(routeDistance)} m zurückgelegt`}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Back Hint */}
-            <View style={styles.swipeHintLeft}>
-              <IconSymbol name="chevron.left.2" size={16} color={colors.text.tertiary} />
-              <Text style={styles.swipeHintText}>Zurück zum Status</Text>
-            </View>
-
-            {/* Forward Hint */}
-            <View style={styles.swipeHint}>
-              <Text style={styles.swipeHintText}>Guardians</Text>
-              <IconSymbol name="chevron.right.2" size={16} color={colors.text.tertiary} />
-            </View>
           </View>
 
           {/* Page 3: Guardians List */}
@@ -929,22 +835,9 @@ export default function ActiveTripScreen() {
               ))}
             </View>
 
-            {/* Info Text */}
-            <View style={styles.guardianInfoBox}>
-              <IconSymbol name="info.circle.fill" size={18} color={colors.primary[500]} />
-              <Text style={styles.guardianInfoText}>
-                Guardians die akzeptiert oder noch nicht geantwortet haben, erhalten Updates zu deinem Trip.
-              </Text>
-            </View>
-
-            {/* Back Hint */}
-            <View style={styles.swipeHintLeft}>
-              <IconSymbol name="chevron.left.2" size={16} color={colors.text.tertiary} />
-              <Text style={styles.swipeHintText}>Zurück zum SOS</Text>
-            </View>
           </View>
         </ScrollView>
-      </SafeAreaView>
+      </View>
 
       {/* Check-in Modal */}
       <CheckinModal
@@ -1056,8 +949,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radii['3xl'],
     borderTopRightRadius: radii['3xl'],
     ...shadows.xl,
-    paddingBottom: spacing.lg,
-    maxHeight: SCREEN_HEIGHT * 0.55,
+    paddingBottom: 0,
+    maxHeight: SCREEN_HEIGHT * 0.42,
   },
   handleContainer: {
     alignItems: 'center',

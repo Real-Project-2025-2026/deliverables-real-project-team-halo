@@ -142,7 +142,7 @@ export default function RouteSetupScreen() {
 
       const { success, trip, error } = await startTrip({
         mode: (params.mode as any) || 'interval',
-        checkinInterval,
+        checkinIntervalMinutes: checkinInterval,
         safetogetherEnabled: params.safetogetherEnabled === 'true',
         guardianIds,
         originLatitude: origin.latitude,

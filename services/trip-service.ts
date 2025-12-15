@@ -37,6 +37,12 @@ export interface TripServiceError {
 export async function startTrip(
   params: StartTripParams
 ): Promise<{ data: Trip | null; error: TripServiceError | null }> {
+  console.log('[TripService] startTrip called with params:', {
+    mode: params.mode,
+    checkinIntervalMinutes: params.checkinIntervalMinutes,
+    safetogetherEnabled: params.safetogetherEnabled,
+  });
+  
   try {
     // Use getUser() instead of getSession() to ensure fresh session
     const {
@@ -65,6 +71,8 @@ export async function startTrip(
     }
 
     // Create new trip
+    console.log('[TripService] Creating trip with checkin_interval_minutes:', params.checkinIntervalMinutes);
+    
     const tripData: TripInsert = {
       user_id: user.id,
       mode: params.mode,

@@ -61,6 +61,9 @@ export default function HomeScreen() {
   // Guardian Requests State (for when someone wants you as their guardian)
   const [guardianRequests, setGuardianRequests] = useState<GuardianRequest[]>(DUMMY_GUARDIAN_REQUESTS);
   
+  // Bottom Sheet Tab State
+  const [activeTab, setActiveTab] = useState<0 | 1 | 2>(0);
+  
   // Trip Planning Overlay State
   const [showTripOverlay, setShowTripOverlay] = useState(false);
   const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
@@ -146,6 +149,15 @@ export default function HomeScreen() {
       });
     }, [refreshActiveTrip])
   );
+
+  // Auto-switch to relevant tab
+  useEffect(() => {
+    if (guardianRequests.length > 0 && activeTab === 0) {
+      setActiveTab(2); // Switch to Guardian Requests tab if there are requests
+    } else if (activeTrip && activeTab === 0 && guardianRequests.length === 0) {
+      setActiveTab(1); // Switch to Trips tab if user has an active trip
+    }
+  }, [guardianRequests.length, activeTrip, activeTab]);
 
   // Request location on mount and start watching
   useEffect(() => {
@@ -379,13 +391,13 @@ export default function HomeScreen() {
     try {
       const { error } = await startTrip({
         mode: 'interval',
-        checkinInterval: actualInterval,
+        checkinIntervalMinutes: actualInterval,
         safetogetherEnabled: false,
-        originLat: origin.latitude,
-        originLng: origin.longitude,
+        originLatitude: origin.latitude,
+        originLongitude: origin.longitude,
         originAddress: origin.formattedAddress,
-        destinationLat: destination.latitude,
-        destinationLng: destination.longitude,
+        destinationLatitude: destination.latitude,
+        destinationLongitude: destination.longitude,
         destinationAddress: destination.formattedAddress,
         guardianIds: selectedGuardians.length > 0 ? selectedGuardians : undefined,
       });
@@ -979,141 +991,199 @@ export default function HomeScreen() {
         enablePanDownToClose={false}
         backgroundStyle={styles.bottomSheetBackground}
         handleIndicatorStyle={styles.handleIndicator}>
-        <BottomSheetScrollView 
-          style={styles.scrollView}
-          contentContainerStyle={styles.contentContainer}
-          showsVerticalScrollIndicator={false}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.greeting}>
-              Hi, {profile?.full_name || user?.email?.split('@')[0] || 'there'}
-            </Text>
-            <Text style={styles.subtitle}>Stay safe on your journey</Text>
+        <View style={styles.bottomSheetContent}>
+          {/* Tab Buttons */}
+          <View style={styles.tabContainer}>
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 0 && styles.tabButtonActive]}
+              onPress={() => setActiveTab(0)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.tabButtonText, activeTab === 0 && styles.tabButtonTextActive]}>
+                Menü
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 1 && styles.tabButtonActive]}
+              onPress={() => setActiveTab(1)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.tabButtonText, activeTab === 1 && styles.tabButtonTextActive]}>
+                Trips
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 2 && styles.tabButtonActive]}
+              onPress={() => setActiveTab(2)}
+              activeOpacity={0.7}
+            >
+              {guardianRequests.length > 0 && (
+                <View style={styles.tabBadge}>
+                  <Text style={styles.tabBadgeText}>{guardianRequests.length}</Text>
+                </View>
+              )}
+              <Text style={[styles.tabButtonText, activeTab === 2 && styles.tabButtonTextActive]}>
+                Anfragen
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Guardian Requests - When someone wants you as their guardian */}
-          {guardianRequests.length > 0 && (
-            <View style={styles.guardianRequestsSection}>
-              {guardianRequests.map(request => (
-                <GuardianRequestCard
-                  key={request.id}
-                  request={request}
-                  onAccept={handleAcceptGuardianRequest}
-                  onDecline={handleDeclineGuardianRequest}
-                />
-              ))}
-            </View>
-          )}
+          {/* Tab Content */}
+          <BottomSheetScrollView 
+            style={styles.scrollView}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}>
+            
+            {/* Tab 0: Menü (Placeholder) */}
+            {activeTab === 0 && (
+              <View style={styles.tabContent}>
+                <Text style={styles.comingSoonText}>Menü-Inhalt kommt später</Text>
+              </View>
+            )}
 
-          {/* Active Trip Card - Only shown when trip is active */}
-          {activeTrip && (
-            <TouchableOpacity style={styles.activeTripCard} onPress={handleStartTrip}>
-              <View style={styles.activeTripBadge}>
-                <View style={styles.pulseDot} />
-                <Text style={styles.activeTripBadgeText}>ACTIVE</Text>
-              </View>
-              <Text style={styles.activeTripTitle}>Your trip is in progress</Text>
-              <View style={styles.activeTripRoute}>
-                <View style={styles.routePoint}>
-                  <View style={styles.routeDotGreen} />
-                  <Text style={styles.routeText} numberOfLines={1}>
-                    {activeTrip.origin_address || 'Starting location'}
-                  </Text>
-                </View>
-                <View style={styles.routeLine} />
-                <View style={styles.routePoint}>
-                  <View style={styles.routeDotBlue} />
-                  <Text style={styles.routeText} numberOfLines={1}>
-                    {activeTrip.destination_address || 'Destination'}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.activeTripFooter}>
-                <Text style={styles.activeTripTime}>Tap to view details</Text>
-                <IconSymbol name="chevron.right" size={20} color="#5170FF" />
-              </View>
-            </TouchableOpacity>
-          )}
-
-          {/* Active Guardian Trips Section */}
-          {guardianLocations.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Active Trips</Text>
-              {guardianLocations.slice(0, 3).map((guardian) => (
-                <TouchableOpacity 
-                  key={guardian.id}
-                  style={styles.guardianCard}
-                  onPress={() => router.push(`/guardian-trip/${guardian.id}`)}>
-                  <View style={styles.guardianAvatarContainer}>
-                    {guardian.avatarUrl ? (
-                      <Image 
-                        source={{ uri: guardian.avatarUrl }} 
-                        style={styles.guardianAvatar}
-                        contentFit="cover"
-                      />
-                    ) : (
-                      <View style={styles.guardianAvatarPlaceholder}>
-                        <Text style={styles.guardianAvatarText}>
-                          {(guardian.fullName || guardian.username || '?')[0].toUpperCase()}
+            {/* Tab 1: Trips (Active Trip + Guardian Trips + Quick Actions) */}
+            {activeTab === 1 && (
+              <View style={styles.tabContent}>
+                {/* Active Trip Card - Only shown when trip is active */}
+                {activeTrip && (
+                  <TouchableOpacity style={styles.activeTripCard} onPress={handleStartTrip}>
+                    <View style={styles.activeTripBadge}>
+                      <View style={styles.pulseDot} />
+                      <Text style={styles.activeTripBadgeText}>ACTIVE</Text>
+                    </View>
+                    <Text style={styles.activeTripTitle}>Your trip is in progress</Text>
+                    <View style={styles.activeTripRoute}>
+                      <View style={styles.routePoint}>
+                        <View style={styles.routeDotGreen} />
+                        <Text style={styles.routeText} numberOfLines={1}>
+                          {activeTrip.origin_address || 'Starting location'}
                         </Text>
                       </View>
+                      <View style={styles.routeLine} />
+                      <View style={styles.routePoint}>
+                        <View style={styles.routeDotBlue} />
+                        <Text style={styles.routeText} numberOfLines={1}>
+                          {activeTrip.destination_address || 'Destination'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.activeTripFooter}>
+                      <Text style={styles.activeTripTime}>Tap to view details</Text>
+                      <IconSymbol name="chevron.right" size={20} color="#5170FF" />
+                    </View>
+                  </TouchableOpacity>
+                )}
+
+                {/* Active Guardian Trips Section */}
+                {guardianLocations.length > 0 && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Active Trips</Text>
+                    {guardianLocations.slice(0, 3).map((guardian) => (
+                      <TouchableOpacity 
+                        key={guardian.id}
+                        style={styles.guardianCard}
+                        onPress={() => router.push(`/guardian-trip/${guardian.id}`)}>
+                        <View style={styles.guardianAvatarContainer}>
+                          {guardian.avatarUrl ? (
+                            <Image 
+                              source={{ uri: guardian.avatarUrl }} 
+                              style={styles.guardianAvatar}
+                              contentFit="cover"
+                            />
+                          ) : (
+                            <View style={styles.guardianAvatarPlaceholder}>
+                              <Text style={styles.guardianAvatarText}>
+                                {(guardian.fullName || guardian.username || '?')[0].toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <View style={styles.guardianInfo}>
+                          <Text style={styles.guardianName}>
+                            {guardian.fullName || guardian.username || 'Guardian'}
+                          </Text>
+                          <View style={styles.guardianStatusRow}>
+                            <IconSymbol name="location.fill" size={12} color="#5170FF" />
+                            <Text style={styles.guardianStatus}>Currently traveling</Text>
+                          </View>
+                          <View style={styles.guardianStatusRow}>
+                            <IconSymbol name="checkmark.circle.fill" size={12} color="#34C759" />
+                            <Text style={styles.guardianTime}>Last check-in: Just now</Text>
+                          </View>
+                        </View>
+                        <IconSymbol name="chevron.right" size={20} color="#999" />
+                      </TouchableOpacity>
+                    ))}
+                    
+                    {guardianLocations.length > 3 && (
+                      <TouchableOpacity 
+                        style={styles.seeAllButton}
+                        onPress={() => router.push('/(tabs)/guardian-trips')}>
+                        <Text style={styles.seeAllText}>
+                          See all {guardianLocations.length} trips
+                        </Text>
+                      </TouchableOpacity>
                     )}
                   </View>
-                  <View style={styles.guardianInfo}>
-                    <Text style={styles.guardianName}>
-                      {guardian.fullName || guardian.username || 'Guardian'}
-                    </Text>
-                    <View style={styles.guardianStatusRow}>
-                      <IconSymbol name="location.fill" size={12} color="#5170FF" />
-                      <Text style={styles.guardianStatus}>Currently traveling</Text>
-                    </View>
-                    <View style={styles.guardianStatusRow}>
-                      <IconSymbol name="checkmark.circle.fill" size={12} color="#34C759" />
-                      <Text style={styles.guardianTime}>Last check-in: Just now</Text>
-                    </View>
+                )}
+
+                {/* Quick Actions */}
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Quick Actions</Text>
+                  <View style={styles.quickActionsGrid}>
+                    <TouchableOpacity 
+                      style={styles.quickActionCard}
+                      onPress={() => router.push('/emergency-contacts')}>
+                      <View style={[styles.quickActionIcon, { backgroundColor: '#FF3B30' }]}>
+                        <IconSymbol name="phone.fill" size={20} color="#fff" />
+                      </View>
+                      <Text style={styles.quickActionTitle}>Emergency</Text>
+                      <Text style={styles.quickActionValue}>Quick access</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity 
+                      style={styles.quickActionCard}
+                      onPress={() => router.push('/(tabs)/explore')}>
+                      <View style={[styles.quickActionIcon, { backgroundColor: '#34C759' }]}>
+                        <IconSymbol name="person.2.fill" size={20} color="#fff" />
+                      </View>
+                      <Text style={styles.quickActionTitle}>Together</Text>
+                      <Text style={styles.quickActionValue}>SafeTogether</Text>
+                    </TouchableOpacity>
                   </View>
-                  <IconSymbol name="chevron.right" size={20} color="#999" />
-                </TouchableOpacity>
-              ))}
-              
-              {guardianLocations.length > 3 && (
-                <TouchableOpacity 
-                  style={styles.seeAllButton}
-                  onPress={() => router.push('/(tabs)/guardian-trips')}>
-                  <Text style={styles.seeAllText}>
-                    See all {guardianLocations.length} trips
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
-          {/* Quick Actions */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.quickActionsGrid}>
-              <TouchableOpacity 
-                style={styles.quickActionCard}
-                onPress={() => router.push('/emergency-contacts')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#FF3B30' }]}>
-                  <IconSymbol name="phone.fill" size={20} color="#fff" />
                 </View>
-                <Text style={styles.quickActionTitle}>Emergency</Text>
-                <Text style={styles.quickActionValue}>Quick access</Text>
-              </TouchableOpacity>
+              </View>
+            )}
 
-              <TouchableOpacity 
-                style={styles.quickActionCard}
-                onPress={() => router.push('/(tabs)/explore')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#34C759' }]}>
-                  <IconSymbol name="person.2.fill" size={20} color="#fff" />
-                </View>
-                <Text style={styles.quickActionTitle}>Together</Text>
-                <Text style={styles.quickActionValue}>SafeTogether</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </BottomSheetScrollView>
+            {/* Tab 2: Guardian Requests */}
+            {activeTab === 2 && (
+              <View style={styles.tabContent}>
+                {guardianRequests.length > 0 ? (
+                  <View style={styles.guardianRequestsSection}>
+                    {guardianRequests.map(request => (
+                      <GuardianRequestCard
+                        key={request.id}
+                        request={request}
+                        onAccept={handleAcceptGuardianRequest}
+                        onDecline={handleDeclineGuardianRequest}
+                      />
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.emptyState}>
+                    <IconSymbol name="shield" size={48} color="#999" />
+                    <Text style={styles.emptyStateText}>Keine Anfragen</Text>
+                    <Text style={styles.emptyStateSubtext}>
+                      Du hast aktuell keine Guardian-Anfragen
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </BottomSheetScrollView>
+        </View>
       </BottomSheet>
     </GestureHandlerRootView>
   );
@@ -1255,11 +1325,89 @@ const styles = StyleSheet.create({
     backgroundColor: '#ccc',
     width: 40,
   },
+  bottomSheetContent: {
+    flex: 1,
+  },
+  // Tab Styles
+  tabContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    position: 'relative',
+    backgroundColor: 'rgba(81, 112, 255, 0.15)',
+  },
+  tabButtonActive: {
+    backgroundColor: '#5170FF',
+  },
+  tabButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#5170FF',
+  },
+  tabButtonTextActive: {
+    color: '#fff',
+  },
+  tabBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 8,
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    zIndex: 10,
+  },
+  tabBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  tabContent: {
+    flex: 1,
+  },
+  comingSoonText: {
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 40,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  emptyStateText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
   scrollView: {
     flex: 1,
   },
   contentContainer: {
     paddingHorizontal: 20,
+    paddingTop: 20,
     paddingBottom: 40,
   },
   header: {
