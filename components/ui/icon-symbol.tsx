@@ -28,6 +28,17 @@ const MAPPING = {
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
   'checkmark': 'check',
+  // Panic Button Icons
+  'sos': 'warning',
+  'exclamationmark.triangle.fill': 'warning',
+  'xmark': 'close',
+  'hand.raised.fill': 'pan-tool',
+  'checkmark.shield.fill': 'verified-user',
+  'bell.fill': 'notifications',
+  'clock.fill': 'schedule',
+  'checkmark.circle.fill': 'check-circle',
+  'shield.fill': 'shield',
+  'shield': 'shield',
 } as IconMapping;
 
 /**

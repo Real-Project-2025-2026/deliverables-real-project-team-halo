@@ -1,110 +1,67 @@
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Alert,
-  ActivityIndicator,
   FlatList,
   Modal,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Picker } from '@react-native-picker/picker';
 import { router } from 'expo-router';
-import { useTrip } from '@/hooks/use-trip';
-import { useLocation } from '@/hooks/use-location';
 import { useGuardian } from '@/hooks/use-guardian';
 import { useAuth } from '@/providers/auth-provider';
-import { startBackgroundLocationTracking } from '@/services/background-location';
 import type { TripMode } from '@/services/trip-service';
 import type { GuardianWithProfile } from '@/services/guardian-service';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { MapViewWrapper } from '@/components/map-view-wrapper';
-import BottomSheet, { BottomSheetView, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function StartTripScreen() {
   const { user } = useAuth();
-  const { startTrip, isLoading } = useTrip();
-  const { location, getCurrentLocation, requestPermission, permissionStatus } = useLocation();
   const { guardians } = useGuardian();
-  const bottomSheetRef = useRef<BottomSheet>(null);
 
   const [selectedMode, setSelectedMode] = useState<TripMode>('interval');
   const [checkinInterval, setCheckinInterval] = useState<number | 'custom'>(5);
   const [customIntervalValue, setCustomIntervalValue] = useState<number>(15);
   const [showCustomPickerModal, setShowCustomPickerModal] = useState(false);
-  const [safetogetherEnabled, setSafetogetherEnabled] = useState(false);
   const [selectedGuardians, setSelectedGuardians] = useState<string[]>([]);
   const [showGuardianSelector, setShowGuardianSelector] = useState(false);
 
-  const snapPoints = useMemo(() => ['90%'], []);
-
   async function handleStartTrip() {
     try {
-      if (permissionStatus !== 'granted') {
-        const granted = await requestPermission();
-        if (!granted) {
-          Alert.alert(
-            'Permission Required',
-            'Location permission is required to start a trip.'
-          );
-          return;
-        }
-      }
-
-      const currentLocation = await getCurrentLocation();
-      if (!currentLocation) {
-        Alert.alert('Error', 'Could not get your current location. Please try again.');
-        return;
-      }
-
-      // Determine the actual interval value
       let actualInterval = checkinInterval;
       if (checkinInterval === 'custom') {
         actualInterval = customIntervalValue;
       }
 
-      const { success, trip, error } = await startTrip({
-        mode: selectedMode,
-        checkinIntervalMinutes: actualInterval as number,
-        safetogetherEnabled,
-        guardianIds: selectedGuardians.length > 0 ? selectedGuardians : undefined,
-        originLatitude: currentLocation.coords.latitude,
-        originLongitude: currentLocation.coords.longitude,
+      router.push({
+        pathname: '/trip/route-setup',
+        params: {
+          mode: selectedMode,
+          checkinInterval: checkinInterval.toString(),
+          customIntervalValue: customIntervalValue.toString(),
+          safetogetherEnabled: 'false',
+          guardianIds: selectedGuardians.length > 0 ? selectedGuardians.join(',') : '',
+        },
       });
-
-      if (!success || !trip) {
-        const errorMessage = error || 'Failed to start trip. Please try again.';
-        Alert.alert('Error', errorMessage);
-        console.error('Trip start error:', error);
-        return;
-      }
-
-      // Start background location tracking if needed
-      if (selectedMode !== 'silent') {
-        await startBackgroundLocationTracking();
-      }
-
-      // Navigate to active trip screen
-      router.replace('/trip/active');
     } catch (error) {
-      console.error('Error starting trip:', error);
+      console.error('Error navigating to route setup:', error);
       Alert.alert('Error', 'Something went wrong. Please try again.');
     }
   }
 
-  const modes: { value: TripMode; label: string; icon: string }[] = [
-    { value: 'silent', label: 'Silent', icon: 'moon.fill' },
-    { value: 'interval', label: 'Interval', icon: 'clock.fill' },
-    { value: 'continuous', label: 'Continuous', icon: 'location.fill' },
+  const modes: { value: TripMode; label: string; description: string; icon: string }[] = [
+    { value: 'silent', label: 'Silent', description: 'No check-ins required', icon: 'moon.fill' },
+    { value: 'interval', label: 'Interval', description: 'Regular check-ins', icon: 'clock.fill' },
+    { value: 'continuous', label: 'Continuous', description: 'Live tracking', icon: 'location.fill' },
   ];
 
   const intervals: (number | 'custom')[] = [3, 5, 10, 'custom'];
 
-  // Get the other user from a Guardian relationship
   const getOtherUser = useCallback(
     (guardian: GuardianWithProfile) => {
       if (guardian.requester_id === user?.id) {
@@ -115,7 +72,6 @@ export default function StartTripScreen() {
     [user]
   );
 
-  // Render avatar or placeholder
   const renderAvatar = useCallback(
     (profile: { avatar_url: string | null; username: string | null; full_name: string | null }) => {
       const firstLetter = (profile.username || profile.full_name || '?')[0].toUpperCase();
@@ -154,19 +110,20 @@ export default function StartTripScreen() {
       return (
         <TouchableOpacity
           style={[styles.guardianItem, isSelected && styles.guardianItemSelected]}
-          onPress={() => toggleGuardian(otherUser.id)}>
+          onPress={() => toggleGuardian(otherUser.id)}
+          activeOpacity={0.7}>
           {renderAvatar(otherUser)}
           <View style={styles.guardianItemInfo}>
-            <Text style={styles.guardianItemUsername}>
-              @{otherUser.username || 'unknown'}
+            <Text style={styles.guardianItemName}>
+              {otherUser.full_name || otherUser.username || 'Unknown'}
             </Text>
-            {otherUser.full_name && (
-              <Text style={styles.guardianItemName}>{otherUser.full_name}</Text>
+            {otherUser.username && (
+              <Text style={styles.guardianItemUsername}>@{otherUser.username}</Text>
             )}
           </View>
-          {isSelected && (
-            <IconSymbol name="checkmark.circle.fill" size={24} color="#fff" />
-          )}
+          <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
+            {isSelected && <View style={styles.radioInner} />}
+          </View>
         </TouchableOpacity>
       );
     },
@@ -174,106 +131,119 @@ export default function StartTripScreen() {
   );
 
   return (
-    <GestureHandlerRootView style={styles.container}>
-      <MapViewWrapper
-        userLocation={
-          location
-            ? {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-              }
-            : undefined
-        }
-      />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <IconSymbol name="chevron.left" size={20} color="#5170FF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Trip Settings</Text>
+        <View style={{ width: 44 }} />
+      </View>
 
-      <BottomSheet
-        ref={bottomSheetRef}
-        index={0}
-        snapPoints={snapPoints}
-        enablePanDownToClose={false}
-        backgroundStyle={styles.bottomSheetBackground}
-        handleIndicatorStyle={styles.handleIndicator}>
-        <BottomSheetScrollView style={styles.contentContainer}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <IconSymbol name="chevron.left" size={24} color="#fff" />
-            </TouchableOpacity>
-            <Text style={styles.title}>Start Trip</Text>
-            <View style={{ width: 40 }} />
-          </View>
-
-          {/* Mode Selection */}
-          <Text style={styles.sectionTitle}>Select Mode</Text>
-          {modes.map((mode) => (
-            <TouchableOpacity
-              key={mode.value}
-              style={[
-                styles.modeCard,
-                selectedMode === mode.value && styles.modeCardSelected,
-              ]}
-              onPress={() => setSelectedMode(mode.value)}>
-              <View style={styles.modeIcon}>
-                <IconSymbol
-                  name={mode.icon as any}
-                  size={24}
-                  color="#fff"
-                />
-              </View>
-              <Text
-                style={[
-                  styles.modeLabel,
-                  selectedMode === mode.value && styles.modeLabelSelected,
-                ]}>
-                {mode.label}
-              </Text>
-              {selectedMode === mode.value && (
-                <IconSymbol name="checkmark.circle.fill" size={24} color="#fff" />
-              )}
-            </TouchableOpacity>
-          ))}
-
-          {/* Check-in Interval */}
-          {selectedMode !== 'silent' && (
-            <>
-              <Text style={styles.sectionTitle}>Check-in Interval</Text>
-              <View style={styles.intervalContainer}>
-                {intervals.map((interval) => (
-                  <TouchableOpacity
-                    key={interval}
-                    style={[
-                      styles.intervalButton,
-                      checkinInterval === interval && styles.intervalButtonSelected,
-                    ]}
-                    onPress={() => {
-                      if (interval === 'custom') {
-                        setShowCustomPickerModal(true);
-                        setCheckinInterval('custom');
-                      } else {
-                        setCheckinInterval(interval);
-                      }
-                    }}>
-                    <Text
-                      style={[
-                        styles.intervalText,
-                        checkinInterval === interval && styles.intervalTextSelected,
-                      ]}>
-                      {interval === 'custom' 
-                        ? (checkinInterval === 'custom' ? `${customIntervalValue}m` : 'Custom')
-                        : `${interval}m`}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
-          )}
-
-          {/* SafeTogether - Connect with Guardians */}
-          <Text style={styles.sectionTitle}>SafeTogether</Text>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}>
+        
+        {/* Mode Selection */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Mode</Text>
+          <Text style={styles.sectionSubtitle}>Choose how you want to be monitored</Text>
           
-          {/* Connect with my Guardians */}
+          <View style={styles.modeContainer}>
+            {modes.map((mode, index) => (
+              <TouchableOpacity
+                key={mode.value}
+                style={[
+                  styles.modeCard,
+                  selectedMode === mode.value && styles.modeCardSelected,
+                  index === 0 && styles.modeCardFirst,
+                  index === modes.length - 1 && styles.modeCardLast,
+                ]}
+                onPress={() => setSelectedMode(mode.value)}
+                activeOpacity={0.7}>
+                <View style={styles.modeLeft}>
+                  <View style={[
+                    styles.modeIconContainer,
+                    selectedMode === mode.value && styles.modeIconContainerSelected
+                  ]}>
+                    <IconSymbol 
+                      name={mode.icon as any} 
+                      size={20} 
+                      color={selectedMode === mode.value ? '#fff' : '#5170FF'} 
+                    />
+                  </View>
+                  <View style={styles.modeContent}>
+                    <Text style={[
+                      styles.modeTitle,
+                      selectedMode === mode.value && styles.modeTitleSelected
+                    ]}>
+                      {mode.label}
+                    </Text>
+                    <Text style={styles.modeDescription}>{mode.description}</Text>
+                  </View>
+                </View>
+                <View style={[styles.radioOuter, selectedMode === mode.value && styles.radioOuterSelected]}>
+                  {selectedMode === mode.value && <View style={styles.radioInner} />}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Check-in Interval */}
+        {selectedMode !== 'silent' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Check-in Interval</Text>
+            <Text style={styles.sectionSubtitle}>How often should we check on you?</Text>
+            
+            <View style={styles.intervalContainer}>
+              {intervals.map((interval) => (
+                <TouchableOpacity
+                  key={interval}
+                  style={[
+                    styles.intervalCard,
+                    checkinInterval === interval && styles.intervalCardSelected,
+                  ]}
+                  onPress={() => {
+                    if (interval === 'custom') {
+                      setShowCustomPickerModal(true);
+                      setCheckinInterval('custom');
+                    } else {
+                      setCheckinInterval(interval);
+                    }
+                  }}
+                  activeOpacity={0.7}>
+                  <Text
+                    style={[
+                      styles.intervalValue,
+                      checkinInterval === interval && styles.intervalValueSelected,
+                    ]}>
+                    {interval === 'custom' 
+                      ? (checkinInterval === 'custom' ? customIntervalValue : '...')
+                      : interval}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.intervalLabel,
+                      checkinInterval === interval && styles.intervalLabelSelected,
+                    ]}>
+                    {interval === 'custom' ? 'custom' : 'min'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Guardians */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Guardians</Text>
+          <Text style={styles.sectionSubtitle}>Who should be notified about your trip?</Text>
+          
           <TouchableOpacity
-            style={styles.guardianCard}
+            style={styles.guardianSelector}
             onPress={() => {
               if (guardians.length === 0) {
                 Alert.alert(
@@ -283,65 +253,75 @@ export default function StartTripScreen() {
                 return;
               }
               setShowGuardianSelector(true);
-            }}>
-            <View style={styles.toggleIcon}>
-              <IconSymbol name="person.2.fill" size={24} color="#fff" />
-            </View>
-            <View style={styles.toggleInfo}>
-              <Text style={styles.toggleLabel}>Connect with my Guardians</Text>
-              {selectedGuardians.length > 0 && (
-                <Text style={styles.toggleSubtext}>
-                  {selectedGuardians.length} Guardian{selectedGuardians.length !== 1 ? 's' : ''} selected
+            }}
+            activeOpacity={0.7}>
+            <View style={styles.guardianSelectorLeft}>
+              <View style={styles.guardianIconContainer}>
+                <IconSymbol name="person.2.fill" size={20} color="#5170FF" />
+              </View>
+              <View style={styles.guardianSelectorContent}>
+                <Text style={styles.guardianSelectorTitle}>
+                  {selectedGuardians.length > 0 
+                    ? `${selectedGuardians.length} Guardian${selectedGuardians.length !== 1 ? 's' : ''} selected`
+                    : 'Select Guardians'}
                 </Text>
-              )}
-              {guardians.length === 0 && (
-                <Text style={styles.toggleSubtext}>No Guardians yet</Text>
-              )}
+                <Text style={styles.guardianSelectorSubtitle}>
+                  {guardians.length === 0 
+                    ? 'No Guardians added yet' 
+                    : `${guardians.length} available`}
+                </Text>
+              </View>
             </View>
-            <IconSymbol name="chevron.right" size={20} color="#fff" />
+            <IconSymbol name="chevron.right" size={18} color="#5170FF" />
           </TouchableOpacity>
 
-          {/* Connect with nearby users (secondary option) */}
-          <TouchableOpacity
-            style={[styles.toggleCard, styles.toggleCardSecondary]}
-            onPress={() => setSafetogetherEnabled(!safetogetherEnabled)}>
-            <View style={styles.toggleIcon}>
-              <IconSymbol name="location.fill" size={24} color="#fff" />
+          {/* Selected Guardians Preview */}
+          {selectedGuardians.length > 0 && (
+            <View style={styles.selectedGuardiansPreview}>
+              {guardians
+                .filter(g => {
+                  const otherUser = getOtherUser(g);
+                  return selectedGuardians.includes(otherUser.id);
+                })
+                .slice(0, 3)
+                .map((guardian, index) => {
+                  const otherUser = getOtherUser(guardian);
+                  return (
+                    <View 
+                      key={otherUser.id} 
+                      style={[
+                        styles.previewAvatar,
+                        { marginLeft: index > 0 ? -12 : 0, zIndex: 3 - index }
+                      ]}>
+                      {renderAvatar(otherUser)}
+                    </View>
+                  );
+                })}
+              {selectedGuardians.length > 3 && (
+                <View style={[styles.previewAvatar, styles.previewMore, { marginLeft: -12 }]}>
+                  <Text style={styles.previewMoreText}>+{selectedGuardians.length - 3}</Text>
+                </View>
+              )}
             </View>
-            <View style={styles.toggleInfo}>
-              <Text style={styles.toggleLabel}>Connect with nearby users</Text>
-              <Text style={styles.toggleSubtext}>Coming soon</Text>
-            </View>
-            <View
-              style={[
-                styles.switch,
-                safetogetherEnabled && styles.switchActive,
-              ]}>
-              <View
-                style={[
-                  styles.switchThumb,
-                  safetogetherEnabled && styles.switchThumbActive,
-                ]}
-              />
-            </View>
-          </TouchableOpacity>
+          )}
+        </View>
 
-          {/* Start Button */}
-          <TouchableOpacity
-            style={[styles.startButton, isLoading && styles.startButtonDisabled]}
-            onPress={handleStartTrip}
-            disabled={isLoading}>
-            {isLoading ? (
-              <ActivityIndicator color="#5170FF" />
-            ) : (
-              <>
-                <IconSymbol name="play.fill" size={20} color="#5170FF" />
-                <Text style={styles.startButtonText}>Start Trip</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </BottomSheetScrollView>
-      </BottomSheet>
+        {/* Spacer */}
+        <View style={{ height: 32 }} />
+
+        {/* Continue Button */}
+        <TouchableOpacity
+          style={styles.continueButton}
+          onPress={handleStartTrip}
+          activeOpacity={0.8}>
+          <Text style={styles.continueButtonText}>Continue</Text>
+        </TouchableOpacity>
+
+        {/* Helper Text */}
+        <Text style={styles.helperText}>
+          You can modify these settings during your trip
+        </Text>
+      </ScrollView>
 
       {/* Guardian Selection Modal */}
       <Modal
@@ -351,17 +331,17 @@ export default function StartTripScreen() {
         onRequestClose={() => setShowGuardianSelector(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {/* Modal Header */}
+            <View style={styles.modalHandle} />
+            
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Guardians</Text>
               <TouchableOpacity
                 onPress={() => setShowGuardianSelector(false)}
                 style={styles.modalCloseButton}>
-                <IconSymbol name="xmark" size={24} color="#fff" />
+                <IconSymbol name="xmark" size={16} color="#5170FF" />
               </TouchableOpacity>
             </View>
 
-            {/* Guardian List */}
             {guardians.length > 0 ? (
               <FlatList
                 data={guardians}
@@ -372,22 +352,27 @@ export default function StartTripScreen() {
               />
             ) : (
               <View style={styles.modalEmptyContainer}>
-                <IconSymbol name="person.2.fill" size={64} color="rgba(255, 255, 255, 0.3)" />
-                <Text style={styles.modalEmptyText}>
-                  No Guardians available
-                </Text>
+                <View style={styles.emptyIconContainer}>
+                  <IconSymbol name="person.2.fill" size={32} color="#5170FF" />
+                </View>
+                <Text style={styles.modalEmptyText}>No Guardians yet</Text>
                 <Text style={styles.modalEmptySubtext}>
-                  Add Guardians in the SafeTogether tab
+                  Add Guardians in SafeTogether to share your trips with them
                 </Text>
               </View>
             )}
 
-            {/* Done Button */}
-            <TouchableOpacity
-              style={styles.modalDoneButton}
-              onPress={() => setShowGuardianSelector(false)}>
-              <Text style={styles.modalDoneButtonText}>Done</Text>
-            </TouchableOpacity>
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalDoneButton}
+                onPress={() => setShowGuardianSelector(false)}>
+                <Text style={styles.modalDoneButtonText}>
+                  {selectedGuardians.length > 0 
+                    ? `Done (${selectedGuardians.length} selected)` 
+                    : 'Done'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -403,8 +388,9 @@ export default function StartTripScreen() {
           activeOpacity={1}
           onPress={() => setShowCustomPickerModal(false)}>
           <View style={styles.pickerModalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHandle} />
             <View style={styles.pickerModalHeader}>
-              <Text style={styles.pickerModalTitle}>Select Minutes</Text>
+              <Text style={styles.pickerModalTitle}>Custom Interval</Text>
               <TouchableOpacity
                 onPress={() => setShowCustomPickerModal(false)}
                 style={styles.pickerModalDoneButton}>
@@ -420,7 +406,7 @@ export default function StartTripScreen() {
                 {Array.from({ length: 60 }, (_, i) => i + 1).map((value) => (
                   <Picker.Item
                     key={value}
-                    label={value.toString()}
+                    label={`${value} minutes`}
                     value={value}
                   />
                 ))}
@@ -429,215 +415,272 @@ export default function StartTripScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
-    </GestureHandlerRootView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  bottomSheetBackground: {
-    backgroundColor: '#5170FF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  handleIndicator: {
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    width: 40,
-  },
-  contentContainer: {
-    paddingHorizontal: 24,
-    paddingBottom: 40,
+    backgroundColor: '#fff',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(81, 112, 255, 0.08)',
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(81, 112, 255, 0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#000',
+    letterSpacing: -0.3,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 32,
+    paddingBottom: 40,
+  },
+  section: {
+    marginBottom: 40,
   },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 16,
-    marginBottom: 12,
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 4,
+    letterSpacing: -0.5,
+  },
+  sectionSubtitle: {
+    fontSize: 15,
+    color: 'rgba(0, 0, 0, 0.5)',
+    marginBottom: 20,
+    letterSpacing: -0.2,
+  },
+  // Mode Cards
+  modeContainer: {
+    backgroundColor: 'rgba(81, 112, 255, 0.04)',
+    borderRadius: 20,
+    overflow: 'hidden',
   },
   modeCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    justifyContent: 'space-between',
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(81, 112, 255, 0.06)',
+  },
+  modeCardFirst: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  modeCardLast: {
+    borderBottomWidth: 0,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
   },
   modeCardSelected: {
-    borderColor: '#fff',
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: 'rgba(81, 112, 255, 0.08)',
   },
-  modeIcon: {
+  modeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  modeIconContainer: {
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 14,
+    backgroundColor: 'rgba(81, 112, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 16,
   },
-  modeLabel: {
+  modeIconContainerSelected: {
+    backgroundColor: '#5170FF',
+  },
+  modeContent: {
     flex: 1,
+  },
+  modeTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#000',
+    marginBottom: 2,
+    letterSpacing: -0.2,
   },
-  modeLabelSelected: {
-    color: '#fff',
+  modeTitleSelected: {
+    color: '#5170FF',
   },
+  modeDescription: {
+    fontSize: 14,
+    color: 'rgba(0, 0, 0, 0.4)',
+    letterSpacing: -0.1,
+  },
+  // Radio Button
+  radioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: 'rgba(81, 112, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  radioOuterSelected: {
+    borderColor: '#5170FF',
+  },
+  radioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#5170FF',
+  },
+  // Interval Cards
   intervalContainer: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
   },
-  intervalButton: {
+  intervalCard: {
     flex: 1,
-    paddingVertical: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: 10,
+    aspectRatio: 1,
+    backgroundColor: 'rgba(81, 112, 255, 0.04)',
+    borderRadius: 20,
+    justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  intervalButtonSelected: {
-    borderColor: '#fff',
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  intervalCardSelected: {
+    borderColor: '#5170FF',
+    backgroundColor: 'rgba(81, 112, 255, 0.08)',
   },
-  intervalText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-    opacity: 0.8,
+  intervalValue: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: 'rgba(0, 0, 0, 0.3)',
+    letterSpacing: -1,
   },
-  intervalTextSelected: {
-    color: '#fff',
-    opacity: 1,
+  intervalValueSelected: {
+    color: '#5170FF',
   },
-  toggleCard: {
+  intervalLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(0, 0, 0, 0.3)',
+    marginTop: 2,
+    letterSpacing: -0.2,
+  },
+  intervalLabelSelected: {
+    color: '#5170FF',
+  },
+  // Guardian Selector
+  guardianSelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    padding: 16,
-    borderRadius: 12,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(81, 112, 255, 0.04)',
+    borderRadius: 20,
+    padding: 20,
   },
-  toggleIcon: {
+  guardianSelectorLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  guardianIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: 'rgba(81, 112, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  guardianSelectorContent: {
+    flex: 1,
+  },
+  guardianSelectorTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 2,
+    letterSpacing: -0.2,
+  },
+  guardianSelectorSubtitle: {
+    fontSize: 14,
+    color: 'rgba(0, 0, 0, 0.4)',
+    letterSpacing: -0.1,
+  },
+  // Selected Guardians Preview
+  selectedGuardiansPreview: {
+    flexDirection: 'row',
+    marginTop: 16,
+    paddingLeft: 4,
+  },
+  previewAvatar: {
+    borderWidth: 3,
+    borderColor: '#fff',
+    borderRadius: 24,
+  },
+  previewMore: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#5170FF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
   },
-  toggleInfo: {
-    flex: 1,
-  },
-  toggleLabel: {
-    fontSize: 15,
-    fontWeight: '600',
+  previewMoreText: {
+    fontSize: 13,
+    fontWeight: '700',
     color: '#fff',
   },
-  switch: {
-    width: 48,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    justifyContent: 'center',
-    padding: 2,
-  },
-  switchActive: {
-    backgroundColor: '#fff',
-  },
-  switchThumb: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+  // Continue Button
+  continueButton: {
     backgroundColor: '#5170FF',
-    transform: [{ translateX: 0 }],
-  },
-  switchThumbActive: {
-    backgroundColor: '#5170FF',
-    transform: [{ translateX: 20 }],
-  },
-  startButton: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 18,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    marginTop: 24,
   },
-  startButtonDisabled: {
-    opacity: 0.6,
-  },
-  startButtonText: {
-    color: '#5170FF',
-    fontSize: 16,
+  continueButtonText: {
+    color: '#fff',
+    fontSize: 17,
     fontWeight: '600',
+    letterSpacing: -0.3,
   },
-  guardianCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: 'transparent',
+  helperText: {
+    fontSize: 13,
+    color: 'rgba(0, 0, 0, 0.35)',
+    textAlign: 'center',
+    marginTop: 16,
+    letterSpacing: -0.1,
   },
-  toggleCardSecondary: {
-    opacity: 0.6,
-  },
-  toggleSubtext: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginTop: 2,
-  },
-  guardianItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  guardianItemSelected: {
-    borderColor: '#fff',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  },
+  // Avatar Styles
   avatarSmall: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   avatarPlaceholderSmall: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#5170FF',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -646,119 +689,152 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
+  // Guardian Item
+  guardianItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    marginBottom: 8,
+    backgroundColor: 'rgba(81, 112, 255, 0.04)',
+  },
+  guardianItemSelected: {
+    backgroundColor: 'rgba(81, 112, 255, 0.12)',
+  },
   guardianItemInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 14,
+  },
+  guardianItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    letterSpacing: -0.2,
   },
   guardianItemUsername: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
+    color: 'rgba(0, 0, 0, 0.4)',
+    marginTop: 1,
+    letterSpacing: -0.1,
   },
-  guardianItemName: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  emptyGuardiansText: {
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.7)',
-    textAlign: 'center',
-    padding: 12,
-  },
+  // Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#5170FF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '80%',
-    paddingBottom: 40,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '85%',
+  },
+  modalHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 8,
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 24,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontWeight: '700',
+    color: '#000',
+    letterSpacing: -0.4,
   },
   modalCloseButton: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(81, 112, 255, 0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalListContent: {
-    padding: 24,
-    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 16,
   },
   modalEmptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
+    paddingVertical: 60,
     paddingHorizontal: 40,
+  },
+  emptyIconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 24,
+    backgroundColor: 'rgba(81, 112, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   modalEmptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
-    marginTop: 24,
+    color: '#000',
     marginBottom: 8,
+    letterSpacing: -0.3,
   },
   modalEmptySubtext: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 15,
+    color: 'rgba(0, 0, 0, 0.4)',
     textAlign: 'center',
+    lineHeight: 22,
+    letterSpacing: -0.2,
+  },
+  modalFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
   },
   modalDoneButton: {
-    backgroundColor: '#fff',
-    marginHorizontal: 24,
-    marginTop: 16,
+    backgroundColor: '#5170FF',
     paddingVertical: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     alignItems: 'center',
   },
   modalDoneButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#5170FF',
+    color: '#fff',
+    letterSpacing: -0.2,
   },
+  // Picker Modal
   pickerModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'flex-end',
   },
   pickerModalContent: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 24, // Safe area for iOS
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
   },
   pickerModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
   },
   pickerModalTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#000',
+    letterSpacing: -0.3,
   },
   pickerModalDoneButton: {
     paddingVertical: 8,
@@ -770,7 +846,7 @@ const styles = StyleSheet.create({
     color: '#5170FF',
   },
   pickerModalPickerWrapper: {
-    height: 216, // Standard iOS picker height
+    height: 216,
     overflow: 'hidden',
   },
   pickerModalPicker: {

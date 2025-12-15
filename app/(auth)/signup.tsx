@@ -49,13 +49,35 @@ export default function SignupScreen() {
     setIsLoading(true);
     try {
       // Use supabase.auth.signUp directly to get user and session from response
+      // Include emailRedirectTo so Supabase knows where to redirect after email confirmation
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          emailRedirectTo: `${process.env.EXPO_PUBLIC_SUPABASE_URL}/auth/v1/callback`,
+        },
       });
       
       if (signUpError) {
-        throw signUpError;
+        console.error('[Signup] SignUp error:', signUpError);
+        // Check if it's an email-related error
+        if (signUpError.message?.includes('email') || signUpError.message?.includes('Email')) {
+          Alert.alert(
+            'Signup Error',
+            signUpError.message || 'There was an error with your email. Please check if email confirmation is enabled in Supabase settings.'
+          );
+        } else {
+          throw signUpError;
+        }
+        return;
+      }
+      
+      // Check if email confirmation is required
+      if (signUpData?.user && !signUpData?.session) {
+        console.log('[Signup] Email confirmation required - user created but no session');
+        // This is expected if email confirmation is enabled
+      } else if (signUpData?.user && signUpData?.session) {
+        console.log('[Signup] User created with session - email confirmation may be disabled');
       }
       
       // Get user from signUp response or session

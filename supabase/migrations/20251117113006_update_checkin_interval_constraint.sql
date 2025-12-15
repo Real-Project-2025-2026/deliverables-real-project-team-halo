@@ -8,3 +8,13 @@ ALTER TABLE trips
 ADD CONSTRAINT trips_checkin_interval_minutes_check
 CHECK (checkin_interval_minutes >= 1 AND checkin_interval_minutes <= 60);
 
+
+
+
+
+
+
+
+
+
+

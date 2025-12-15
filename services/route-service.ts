@@ -65,6 +65,8 @@ export async function recordRoutePoint(
 
 /**
  * Get all route points for a trip (ordered by recorded_at)
+ * Works for trip owner - filters by user_id for own trips
+ * Note: For Guardian access, use getRoutePointsForTrip() instead
  */
 export async function getRoutePoints(
   tripId: number
@@ -78,6 +80,8 @@ export async function getRoutePoints(
       return { data: null, error: { error: 'Not authenticated' } };
     }
 
+    // For trip owner: filter by user_id
+    // RLS policies will also ensure user can only see their own route points
     const { data, error } = await supabase
       .from('route_points')
       .select('*')
@@ -94,6 +98,167 @@ export async function getRoutePoints(
     return {
       data: null,
       error: { error: 'Failed to get route points', details: err },
+    };
+  }
+}
+
+/**
+ * Get route points for a trip since a specific timestamp (incremental loading)
+ * Useful for loading only new route points after initial load
+ * Works for both trip owners and Guardians (via RLS policies)
+ */
+export async function getRoutePointsSince(
+  tripId: number,
+  sinceTimestamp: string | Date
+): Promise<{ data: RoutePoint[] | null; error: RouteServiceError | null }> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user) {
+      return { data: null, error: { error: 'Not authenticated' } };
+    }
+
+    const since = typeof sinceTimestamp === 'string' 
+      ? sinceTimestamp 
+      : sinceTimestamp.toISOString();
+
+    // RLS policies will handle authorization:
+    // - Trip owner can see their own route points
+    // - Guardians can see route points for trips they are monitoring
+    const { data, error } = await supabase
+      .from('route_points')
+      .select('*')
+      .eq('trip_id', tripId)
+      .gt('recorded_at', since)
+      .order('recorded_at', { ascending: true });
+
+    if (error) {
+      return { data: null, error: { error: error.message, details: error } };
+    }
+
+    return { data, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: { error: 'Failed to get route points', details: err },
+    };
+  }
+}
+
+/**
+ * Get route points for a trip (for Guardians or trip owner)
+ * RLS policies handle authorization automatically
+ */
+export async function getRoutePointsForTrip(
+  tripId: number
+): Promise<{ data: RoutePoint[] | null; error: RouteServiceError | null }> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user) {
+      return { data: null, error: { error: 'Not authenticated' } };
+    }
+
+    // RLS policies will handle authorization:
+    // - Trip owner can see their own route points
+    // - Guardians can see route points for trips they are monitoring
+    const { data, error } = await supabase
+      .from('route_points')
+      .select('*')
+      .eq('trip_id', tripId)
+      .order('recorded_at', { ascending: true });
+
+    if (error) {
+      return { data: null, error: { error: error.message, details: error } };
+    }
+
+    return { data, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: { error: 'Failed to get route points', details: err },
+    };
+  }
+}
+
+/**
+ * Batch insert route points (for offline queue sync)
+ * More efficient than inserting one by one
+ */
+export async function batchInsertRoutePoints(
+  tripId: number,
+  routePoints: Array<{
+    latitude: number;
+    longitude: number;
+    accuracy?: number | null;
+    altitude?: number | null;
+    heading?: number | null;
+    speed?: number | null;
+    recorded_at: string;
+  }>
+): Promise<{ data: RoutePoint[] | null; error: RouteServiceError | null }> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user) {
+      return { data: null, error: { error: 'Not authenticated' } };
+    }
+
+    if (routePoints.length === 0) {
+      return { data: [], error: null };
+    }
+
+    // Prepare route point data
+    const routePointsData: RoutePointInsert[] = routePoints.map((point) => ({
+      trip_id: tripId,
+      user_id: session.user.id,
+      latitude: point.latitude,
+      longitude: point.longitude,
+      accuracy: point.accuracy ?? null,
+      altitude: point.altitude ?? null,
+      heading: point.heading ?? null,
+      speed: point.speed ?? null,
+      recorded_at: point.recorded_at,
+    }));
+
+    // Insert in batches of 100 to avoid payload size issues
+    const batchSize = 100;
+    const allInserted: RoutePoint[] = [];
+
+    for (let i = 0; i < routePointsData.length; i += batchSize) {
+      const batch = routePointsData.slice(i, i + batchSize);
+      
+      const { data, error } = await supabase
+        .from('route_points')
+        .insert(batch)
+        .select();
+
+      if (error) {
+        return { 
+          data: null, 
+          error: { 
+            error: `Failed to insert batch at index ${i}: ${error.message}`, 
+            details: error 
+          } 
+        };
+      }
+
+      if (data) {
+        allInserted.push(...data);
+      }
+    }
+
+    return { data: allInserted, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      error: { error: 'Failed to batch insert route points', details: err },
     };
   }
 }

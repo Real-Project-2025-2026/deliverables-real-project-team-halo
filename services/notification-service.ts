@@ -644,6 +644,71 @@ export async function sendGuardianEscalationNotification(
 }
 
 /**
+ * Send a Guardian panic button notification
+ * Notifies Guardians when someone they're guarding has pressed the panic button
+ */
+export async function sendGuardianPanicNotification(
+  guardianPushToken: string,
+  userName: string,
+  userUsername: string,
+  location?: { latitude: number; longitude: number }
+): Promise<{ error: NotificationServiceError | null }> {
+  try {
+    if (!guardianPushToken) {
+      return { error: { error: 'No push token available for Guardian' } };
+    }
+
+    let body = `🚨 EMERGENCY: ${userName || userUsername} has pressed the PANIC BUTTON and may need immediate help.`;
+    
+    if (location) {
+      const locationUrl = `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+      body += ` Last known location: ${locationUrl}`;
+    }
+
+    const message = {
+      to: guardianPushToken,
+      sound: 'default',
+      title: '🚨 Guardian Emergency Alert',
+      body,
+      data: {
+        type: 'guardian_panic',
+        location,
+        actionRequired: true,
+      },
+      priority: 'high',
+      channelId: Platform.OS === 'android' ? 'emergency' : undefined,
+    };
+
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
+    });
+
+    const result = await response.json();
+
+    if (result.errors && result.errors.length > 0) {
+      return {
+        error: {
+          error: 'Failed to send Guardian panic notification',
+          details: result.errors,
+        },
+      };
+    }
+
+    return { error: null };
+  } catch (err) {
+    return {
+      error: { error: 'Failed to send Guardian panic notification', details: err },
+    };
+  }
+}
+
+/**
  * Get push token from recipient (from profiles table)
  */
 export async function getRecipientPushToken(recipientId: string): Promise<string | null> {

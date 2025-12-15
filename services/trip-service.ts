@@ -345,7 +345,8 @@ export async function completeTrip(
       return { error: { error: 'Not authenticated' } };
     }
 
-    const { error } = await supabase
+    // Update trip status to completed
+    const { data: updatedTrip, error } = await supabase
       .from('trips')
       .update({
         status: 'completed',
@@ -353,10 +354,18 @@ export async function completeTrip(
         updated_at: new Date().toISOString(),
       })
       .eq('id', tripId)
-      .eq('user_id', session.user.id);
+      .eq('user_id', session.user.id)
+      .select()
+      .single();
 
     if (error) {
       return { error: { error: error.message, details: error } };
+    }
+
+    // Verify that the trip was actually updated
+    if (!updatedTrip || updatedTrip.status !== 'completed') {
+      console.error('Trip completion update may have failed - trip status is:', updatedTrip?.status);
+      return { error: { error: 'Failed to complete trip - status not updated correctly' } };
     }
 
     // Log event (non-blocking)

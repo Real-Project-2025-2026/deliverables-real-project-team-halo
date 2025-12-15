@@ -5,9 +5,12 @@ export default function TripLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: '#F9F9F9' },
+        contentStyle: { backgroundColor: '#fff' },
       }}>
       <Stack.Screen name="start" />
+      <Stack.Screen name="setup" />
+      <Stack.Screen name="route-setup" />
+      <Stack.Screen name="destination-search" />
       <Stack.Screen name="active" />
     </Stack>
   );

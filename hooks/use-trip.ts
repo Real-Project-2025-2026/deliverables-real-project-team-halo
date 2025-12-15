@@ -117,24 +117,32 @@ export function useTrip(): UseTripReturn {
       setIsLoading(true);
       setError(null);
 
-      const { error: tripError } = await tripService.completeTrip(activeTrip.id);
+      const tripId = activeTrip.id;
+      const { error: tripError } = await tripService.completeTrip(tripId);
 
       if (tripError) {
         setError(tripError.error);
         return { success: false };
       }
 
-      // Clear active trip state
+      // Clear active trip state immediately
       setActiveTrip(null);
+      
+      // Verify that trip is actually completed by refreshing
+      // This ensures we don't have stale state
+      await refreshActiveTrip();
+      
       return { success: true };
     } catch (err) {
       setError('Failed to complete trip');
       console.error('Error completing trip:', err);
+      // Still clear the state even on error to prevent stuck UI
+      setActiveTrip(null);
       return { success: false };
     } finally {
       setIsLoading(false);
     }
-  }, [activeTrip]);
+  }, [activeTrip, refreshActiveTrip]);
 
   const cancelTrip = useCallback(async (): Promise<{ success: boolean }> => {
     if (!activeTrip) {

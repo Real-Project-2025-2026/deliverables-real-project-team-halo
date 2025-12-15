@@ -12,7 +12,6 @@ import {
   Dimensions,
   FlatList,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +20,7 @@ import {
   View,
 } from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 type TabType = 'guardians' | 'search' | 'requests';
 
@@ -296,21 +296,21 @@ export default function SafeTogetherScreen() {
               <IconSymbol
                 name={isEscalated ? 'exclamationmark.triangle.fill' : 'circle.fill'}
                 size={8}
-                color="#fff"
+                color={isEscalated ? '#FF3B30' : '#34C759'}
               />
-              <Text style={styles.tripStatusText}>
+              <Text style={[styles.tripStatusText, isEscalated && styles.tripStatusTextEscalated]}>
                 {isEscalated ? 'Emergency' : 'Active'}
               </Text>
             </View>
           </View>
           <View style={styles.tripStats}>
             <View style={styles.tripStatItem}>
-              <IconSymbol name="clock.fill" size={14} color="rgba(255, 255, 255, 0.7)" />
+              <IconSymbol name="clock.fill" size={14} color="#666" />
               <Text style={styles.tripStatText}>{elapsedTime}</Text>
             </View>
             {item.mode !== 'silent' && (
               <View style={styles.tripStatItem}>
-                <IconSymbol name="bell.fill" size={14} color="rgba(255, 255, 255, 0.7)" />
+                <IconSymbol name="bell.fill" size={14} color="#666" />
                 <Text style={styles.tripStatText}>
                   {item.checkin_interval_minutes}min
                 </Text>
@@ -330,7 +330,7 @@ export default function SafeTogetherScreen() {
             )}
           </View>
           <View style={styles.tripFooter}>
-            <IconSymbol name="chevron.right" size={16} color="rgba(255, 255, 255, 0.6)" />
+            <IconSymbol name="chevron.right" size={16} color="#999" />
           </View>
         </TouchableOpacity>
       );
@@ -406,8 +406,8 @@ export default function SafeTogetherScreen() {
         );
       } else if (existingSentRequest) {
         actionButton = (
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>Pending</Text>
+          <View style={styles.statusBadgePending}>
+            <Text style={styles.statusTextPending}>Pending</Text>
           </View>
         );
       } else if (existingPendingRequest) {
@@ -423,7 +423,7 @@ export default function SafeTogetherScreen() {
           <TouchableOpacity
             style={styles.addButton}
             onPress={() => handleSendRequest(item.id, item.username || 'user')}>
-            <IconSymbol name="person.badge.plus" size={16} color="#fff" />
+            <IconSymbol name="person.badge.plus" size={16} color="#5170FF" />
             <Text style={styles.addButtonText}>Add</Text>
           </TouchableOpacity>
         );
@@ -478,12 +478,12 @@ export default function SafeTogetherScreen() {
             <TouchableOpacity
               style={styles.acceptButtonSmall}
               onPress={() => handleAcceptRequest(item.id, requester.username || 'user')}>
-              <IconSymbol name="checkmark.circle.fill" size={20} color="#34C759" />
+              <IconSymbol name="checkmark.circle.fill" size={28} color="#34C759" />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.declineButtonSmall}
               onPress={() => handleDeclineRequest(item.id)}>
-              <IconSymbol name="xmark.circle.fill" size={20} color="#FF3B30" />
+              <IconSymbol name="xmark.circle.fill" size={28} color="#FF3B30" />
             </TouchableOpacity>
           </View>
         </View>
@@ -495,7 +495,7 @@ export default function SafeTogetherScreen() {
   // Empty states
   const renderEmptyGuardians = () => (
     <View style={styles.emptyState}>
-      <IconSymbol name="person.2.fill" size={64} color="rgba(255, 255, 255, 0.3)" />
+      <IconSymbol name="person.2.fill" size={64} color="#ccc" />
       <Text style={styles.emptyTitle}>No Guardians yet</Text>
       <Text style={styles.emptyText}>
         Search for friends and add them as Guardians to stay connected during trips.
@@ -510,7 +510,7 @@ export default function SafeTogetherScreen() {
 
   const renderEmptySearch = () => (
     <View style={styles.emptyState}>
-      <IconSymbol name="magnifyingglass" size={64} color="rgba(255, 255, 255, 0.3)" />
+      <IconSymbol name="magnifyingglass" size={64} color="#ccc" />
       <Text style={styles.emptyTitle}>Search for users</Text>
       <Text style={styles.emptyText}>
         Type at least 3 characters to search for users by username or email.
@@ -520,7 +520,7 @@ export default function SafeTogetherScreen() {
 
   const renderEmptyRequests = () => (
     <View style={styles.emptyState}>
-      <IconSymbol name="bell.fill" size={64} color="rgba(255, 255, 255, 0.3)" />
+      <IconSymbol name="bell.fill" size={64} color="#ccc" />
       <Text style={styles.emptyTitle}>No pending requests</Text>
       <Text style={styles.emptyText}>You don't have any pending Guardian requests.</Text>
     </View>
@@ -528,10 +528,10 @@ export default function SafeTogetherScreen() {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>My Guardians</Text>
+        <Text style={styles.title}>SafeTogether</Text>
         <View style={styles.headerRight}>
           {pendingRequests.length > 0 && (
             <View style={styles.badge}>
@@ -629,7 +629,7 @@ export default function SafeTogetherScreen() {
                       refresh();
                       refreshTrips();
                     }}
-                    tintColor="#fff"
+                    tintColor="#666"
                   />
                 }
               />
@@ -641,18 +641,18 @@ export default function SafeTogetherScreen() {
         <View style={styles.tabContent}>
           <View style={styles.searchContainer}>
             <View style={styles.searchInputContainer}>
-              <IconSymbol name="magnifyingglass" size={20} color="rgba(255, 255, 255, 0.6)" />
+              <IconSymbol name="magnifyingglass" size={20} color="#999" />
               <TextInput
                 style={styles.searchInput}
                 placeholder="Search by username or email..."
-                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                placeholderTextColor="#999"
                 value={searchQuery}
                 onChangeText={handleSearchChange}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
               />
-              {isSearching && <ActivityIndicator size="small" color="#fff" />}
+              {isSearching && <ActivityIndicator size="small" color="#666" />}
             </View>
 
             <FlatList
@@ -665,7 +665,7 @@ export default function SafeTogetherScreen() {
                   ? renderEmptySearch
                   : () => (
                       <View style={styles.emptyState}>
-                        <IconSymbol name="magnifyingglass" size={64} color="rgba(255, 255, 255, 0.3)" />
+                        <IconSymbol name="magnifyingglass" size={64} color="#ccc" />
                         <Text style={styles.emptyTitle}>Search for friends</Text>
                         <Text style={styles.emptyText}>
                           Type at least 3 characters to search for users by username or email.
@@ -685,7 +685,7 @@ export default function SafeTogetherScreen() {
             keyExtractor={(item) => item.id.toString()}
             contentContainerStyle={styles.listContent}
             ListEmptyComponent={renderEmptyRequests}
-            refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refresh} tintColor="#fff" />}
+            refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refresh} tintColor="#666" />}
           />
         </View>
       </ScrollView>
@@ -697,7 +697,7 @@ export default function SafeTogetherScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#5170FF',
+    backgroundColor: '#f9f9f9',
   },
   header: {
     flexDirection: 'row',
@@ -706,11 +706,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 16,
+    backgroundColor: '#f9f9f9',
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#fff',
+    color: '#000',
   },
   headerRight: {
     flexDirection: 'row',
@@ -736,19 +737,17 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderWidth: 2,
-    borderColor: '#ffffff',
+    backgroundColor: '#e0e0e0',
     justifyContent: 'center',
     alignItems: 'center',
   },
   userAvatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   userAvatarPlaceholder: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: '#5170FF',
   },
   userAvatarText: {
     fontSize: 18,
@@ -766,16 +765,20 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#fff',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   tabActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: '#5170FF',
   },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: '#666',
   },
   tabTextActive: {
     color: '#fff',
@@ -815,18 +818,22 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#fff',
     borderRadius: 12,
     paddingHorizontal: 16,
     marginHorizontal: 24,
     marginBottom: 16,
     height: 50,
     gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: '#fff',
+    color: '#000',
   },
   guardiansContent: {
     flex: 1,
@@ -835,10 +842,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#fff',
-    opacity: 0.9,
+    color: '#666',
     marginBottom: 12,
     paddingHorizontal: 24,
     textTransform: 'uppercase',
@@ -850,12 +856,14 @@ const styles = StyleSheet.create({
   },
   tripCard: {
     width: 280,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#fff',
     borderRadius: 16,
     padding: 16,
     marginRight: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
   },
   tripHeader: {
     flexDirection: 'row',
@@ -869,29 +877,32 @@ const styles = StyleSheet.create({
   tripUserName: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#fff',
+    color: '#000',
     marginBottom: 2,
   },
   tripFullName: {
     fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#666',
   },
   tripStatusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(52, 199, 89, 0.3)',
+    backgroundColor: '#E8F5E9',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     gap: 4,
   },
   tripStatusBadgeEscalated: {
-    backgroundColor: 'rgba(255, 59, 48, 0.3)',
+    backgroundColor: '#FFEBEE',
   },
   tripStatusText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#fff',
+    color: '#34C759',
+  },
+  tripStatusTextEscalated: {
+    color: '#FF3B30',
   },
   tripStats: {
     flexDirection: 'row',
@@ -908,7 +919,7 @@ const styles = StyleSheet.create({
   },
   tripStatText: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#666',
   },
   tripStatTextWarning: {
     color: '#FF3B30',
@@ -927,12 +938,14 @@ const styles = StyleSheet.create({
   guardianCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   guardianInfo: {
     flex: 1,
@@ -941,12 +954,12 @@ const styles = StyleSheet.create({
   guardianUsername: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#000',
     marginBottom: 2,
   },
   guardianName: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#666',
   },
   deleteActionContainer: {
     justifyContent: 'center',
@@ -969,12 +982,14 @@ const styles = StyleSheet.create({
   searchCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   searchInfo: {
     flex: 1,
@@ -983,22 +998,24 @@ const styles = StyleSheet.create({
   searchUsername: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#000',
     marginBottom: 2,
   },
   searchName: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#666',
   },
   requestCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   requestInfo: {
     flex: 1,
@@ -1007,17 +1024,17 @@ const styles = StyleSheet.create({
   requestUsername: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#000',
     marginBottom: 2,
   },
   requestName: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#666',
     marginBottom: 4,
   },
   requestTime: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.6)',
+    color: '#999',
   },
   requestActions: {
     flexDirection: 'row',
@@ -1029,7 +1046,7 @@ const styles = StyleSheet.create({
     borderRadius: 25,
   },
   avatarPlaceholder: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#5170FF',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1041,7 +1058,7 @@ const styles = StyleSheet.create({
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(52, 199, 89, 0.2)',
+    backgroundColor: '#E8F5E9',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
@@ -1050,12 +1067,23 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    color: '#34C759',
+  },
+  statusBadgePending: {
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  statusTextPending: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF9800',
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#5170FF',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 12,
@@ -1064,10 +1092,10 @@ const styles = StyleSheet.create({
   addButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#5170FF',
+    color: '#fff',
   },
   acceptButton: {
-    backgroundColor: 'rgba(52, 199, 89, 0.2)',
+    backgroundColor: '#E8F5E9',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 12,
@@ -1077,7 +1105,7 @@ const styles = StyleSheet.create({
   acceptButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    color: '#34C759',
   },
   acceptButtonSmall: {
     padding: 4,
@@ -1094,19 +1122,19 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#fff',
+    color: '#000',
     marginTop: 24,
     marginBottom: 8,
     textAlign: 'center',
   },
   emptyText: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#666',
     textAlign: 'center',
     lineHeight: 20,
   },
   emptyButton: {
-    backgroundColor: '#fff',
+    backgroundColor: '#5170FF',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 12,
@@ -1115,6 +1143,6 @@ const styles = StyleSheet.create({
   emptyButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#5170FF',
+    color: '#fff',
   },
 });

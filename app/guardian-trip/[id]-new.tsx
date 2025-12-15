@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // Dummy Data for Trip Detail
 const DUMMY_TRIP = {
@@ -141,36 +141,20 @@ export default function GuardianTripDetailScreen() {
 
   const formatTime = (isoString: string) => {
     const date = new Date(isoString);
-    const timeString = date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-    const dateString = date.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric' 
-    });
-    return `${timeString}, ${dateString}`;
-  };
-
-  const handleSwipe = (event: any) => {
-    const { translationX, state } = event.nativeEvent;
+    const now = new Date();
+    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
     
-    if (state === State.END) {
-      // Swipe right (translationX > 0) -> go to Overview
-      // Swipe left (translationX < 0) -> go to Activity
-      if (translationX > 50 && activeTab === 'activity') {
-        setActiveTab('overview');
-      } else if (translationX < -50 && activeTab === 'overview') {
-        setActiveTab('activity');
-      }
-    }
+    if (diffMinutes < 1) return 'Just now';
+    if (diffMinutes < 60) return `${diffMinutes}m ago`;
+    
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   const renderOverviewTab = () => (
-    <BottomSheetScrollView 
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: 40 }}>
+    <BottomSheetScrollView showsVerticalScrollIndicator={false}>
       {/* User Info */}
       <View style={styles.userCard}>
         <Image
@@ -266,28 +250,20 @@ export default function GuardianTripDetailScreen() {
     const visibleTimeline = showEarlyEvents ? trip.timeline : trip.timeline.slice(0, 3);
 
     return (
-      <BottomSheetScrollView 
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 40 }}>
+      <BottomSheetScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Activity Timeline</Text>
           
           {visibleTimeline.map((event, index) => (
             <View key={event.id} style={styles.timelineItem}>
               <View style={styles.timelineLeft}>
-                {event.type === 'checkin' && event.status === 'completed' ? (
-                  <View style={styles.checkmarkContainer}>
-                    <IconSymbol name="checkmark" size={10} color="#000" />
-                  </View>
-                ) : (
-                  <View
-                    style={[
-                      styles.timelineDot,
-                      event.status === 'completed' && styles.timelineDotCompleted,
-                      event.status === 'pending' && styles.timelineDotPending,
-                    ]}
-                  />
-                )}
+                <View
+                  style={[
+                    styles.timelineDot,
+                    event.status === 'completed' && styles.timelineDotCompleted,
+                    event.status === 'pending' && styles.timelineDotPending,
+                  ]}
+                />
                 {index < visibleTimeline.length - 1 && (
                   <View style={styles.timelineLine} />
                 )}
@@ -406,12 +382,8 @@ export default function GuardianTripDetailScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Tab Content with Swipe Gesture */}
-          <PanGestureHandler onHandlerStateChange={handleSwipe} activeOffsetX={[-10, 10]}>
-            <View style={{ flex: 1 }}>
-              {activeTab === 'overview' ? renderOverviewTab() : renderActivityTab()}
-            </View>
-          </PanGestureHandler>
+          {/* Tab Content */}
+          {activeTab === 'overview' ? renderOverviewTab() : renderActivityTab()}
         </BottomSheetView>
       </BottomSheet>
     </GestureHandlerRootView>
@@ -577,8 +549,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
     padding: 16,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#B4FF39',
   },
   routeRow: {
     flexDirection: 'row',
@@ -653,20 +623,6 @@ const styles = StyleSheet.create({
   },
   timelineDotPending: {
     backgroundColor: '#FFA500',
-  },
-  checkmarkContainer: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#B4FF39',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
   },
   timelineLine: {
     width: 2,

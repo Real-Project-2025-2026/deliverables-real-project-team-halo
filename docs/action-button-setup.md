@@ -111,3 +111,13 @@ Wenn alles funktioniert:
 - **Action Button**: Nur auf iPhone 15 Pro/Pro Max verfügbar
 - **Fallback**: Notification Actions funktionieren auf allen Geräten
 
+
+
+
+
+
+
+
+
+
+

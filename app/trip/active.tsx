@@ -1,64 +1,143 @@
+import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { CheckinModal } from '@/components/checkin-modal';
 import { MapViewWrapper } from '@/components/map-view-wrapper';
+import { PanicButton } from '@/components/panic-button';
+import { PanicOverlay } from '@/components/panic-overlay';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { colors, radii, shadows, spacing, typography } from '@/constants/design-tokens';
 import { useCheckinTimer } from '@/hooks/use-checkin-timer';
 import { useLocation } from '@/hooks/use-location';
+import { useRouteTracker } from '@/hooks/use-route-tracker';
 import { useTrip } from '@/hooks/use-trip';
+import { useAuth } from '@/providers/auth-provider';
+import { startAlarm, stopAlarm } from '@/services/alarm-service';
 import { stopBackgroundLocationTracking } from '@/services/background-location';
 import * as checkinService from '@/services/checkin-service';
+import { hapticFeedback, vibrateEmergency } from '@/services/haptic-service';
 import {
-  sendCheckinNotification,
-  sendEscalationNotification,
+    sendCheckinNotification,
+    sendEscalationNotification,
 } from '@/services/notification-service';
-import * as routeService from '@/services/route-service';
+import { logPanicEvent, triggerPanicAlarm } from '@/services/panic-service';
 import * as tripService from '@/services/trip-service';
-import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
-import { router, useFocusEffect } from 'expo-router';
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { DUMMY_TRIP_GUARDIANS, type TripGuardian } from '@/types/guardian-request';
+import { calculateTotalDistance } from '@/utils/route-helpers';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const TIMER_SIZE = 160;
+const PAGE_WIDTH = SCREEN_WIDTH;
+const SOS_BUTTON_SIZE = 100;
 
 /**
- * Format duration with seconds as MM:SS (minutes:seconds)
- * Example: 332 seconds = "5:32"
+ * Format time as MM:SS
  */
-function formatDurationWithSeconds(totalSeconds: number): string {
+function formatTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 /**
- * Active Trip Screen - Simplified Version
- * - No automatic navigation
- * - Clear state management
- * - Simple completion flow
+ * Format duration for elapsed time
+ */
+function formatDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes} min`;
+}
+
+/**
+ * Get timer state colors based on remaining time
+ */
+function getTimerState(secondsRemaining: number | null, intervalMinutes: number) {
+  if (secondsRemaining === null) return { color: colors.primary[500], state: 'waiting' };
+  
+  const totalSeconds = intervalMinutes * 60;
+  const percentage = secondsRemaining / totalSeconds;
+  
+  if (percentage > 0.5) {
+    return { color: colors.success.main, state: 'safe' };
+  } else if (percentage > 0.2) {
+    return { color: colors.warning.main, state: 'warning' };
+  } else {
+    return { color: colors.error.main, state: 'urgent' };
+  }
+}
+
+/**
+ * Active Trip Screen - Airbnb-Inspired Redesign with Swipeable Panels
  */
 export default function ActiveTripScreen() {
+  const { profile } = useAuth();
   const { activeTrip, completeTrip, isLoading, updateLocation, refreshActiveTrip } = useTrip();
   const { location, startWatchingLocation, stopWatchingLocation } = useLocation();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [checkinModalVisible, setCheckinModalVisible] = useState(false);
   const [isEscalating, setIsEscalating] = useState(false);
-  const [routePoints, setRoutePoints] = useState<routeService.RoutePoint[]>([]);
-  const [routeDistance, setRouteDistance] = useState<number>(0);
-  const [isLoadingRoute, setIsLoadingRoute] = useState(false);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const [currentPage, setCurrentPage] = useState(0);
   const isCompletingRef = useRef(false);
-
-  const snapPoints = useMemo(() => ['30%', '60%'], []);
+  const scrollViewRef = useRef<ScrollView>(null);
   
-  // Check if trip is escalated
+  // Trip Guardians (people watching over this trip)
+  const [tripGuardians] = useState<TripGuardian[]>(DUMMY_TRIP_GUARDIANS);
+  
+  // Animation values
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // ============= SOS/Panic Button State (same as CustomTabBar) =============
+  const [panicOverlayVisible, setPanicOverlayVisible] = useState(false);
+  const [isInCancelZoneState, setIsInCancelZoneState] = useState(false);
+  const [isPanicTriggering, setIsPanicTriggering] = useState(false);
+  const [panicTriggerComplete, setPanicTriggerComplete] = useState(false);
+  
+  const isInCancelZoneRef = useRef(false);
+  const lastHapticDistance = useRef<number>(Infinity);
+  const hapticThrottleRef = useRef<number>(0);
+
+  // Route tracking
+  const {
+    routePoints,
+    addRoutePoint,
+    refreshRoutePoints,
+  } = useRouteTracker({
+    tripId: activeTrip?.id ?? null,
+    enabled: !!activeTrip && (activeTrip.status === 'active' || activeTrip.status === 'escalated'),
+    shouldRecordOptions: {
+      minDistanceMeters: 10,
+      minTimeSeconds: 30,
+      maxAccuracyMeters: 50,
+    },
+    refreshInterval: 5000,
+    autoSync: true,
+  });
+
+  const routeDistance = calculateTotalDistance(routePoints);
   const isEscalated = activeTrip?.status === 'escalated';
 
-  // Check-in timer (only active if trip is active, not escalated)
+  // Check-in timer
   const {
     pendingCheckin,
     timeUntilNextCheckin,
@@ -70,40 +149,182 @@ export default function ActiveTripScreen() {
     isActive: !!activeTrip && activeTrip.status === 'active' && !isEscalated,
     onCheckinCreated: async (checkin) => {
       setCheckinModalVisible(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       await sendCheckinNotification(checkin.id);
     },
     onCheckinMissed: async (checkin) => {
       setCheckinModalVisible(false);
       
-      // Check if trip was escalated
       const { data: updatedTrip } = await tripService.getActiveTrip();
       if (updatedTrip?.status === 'escalated') {
-        // Escalation happened - show emergency alert
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Alert.alert(
-          '🚨 Emergency Escalation',
-          'You missed multiple check-ins. Your emergency contacts have been notified and will be alerted about your situation.',
+          '🚨 Notfall-Eskalation',
+          'Du hast mehrere Check-ins verpasst. Deine Notfallkontakte wurden benachrichtigt.',
           [{ text: 'OK', style: 'default' }],
           { cancelable: false }
         );
-        
-        // Send escalation notification to device
         await sendEscalationNotification();
-        
-        // Refresh trip to get updated status
         refreshActiveTrip();
       } else {
-        // Just missed one check-in
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         Alert.alert(
-          'Check-in Missed',
-          'You missed a check-in. Your emergency contacts will be notified if you miss another one.'
+          'Check-in verpasst',
+          'Du hast einen Check-in verpasst. Bei einem weiteren Versäumnis werden deine Notfallkontakte benachrichtigt.'
         );
       }
     },
   });
 
-  // No automatic navigation - only manual navigation in handleCompleteTrip
+  // Timer state
+  const timerState = getTimerState(
+    timeUntilNextCheckin,
+    activeTrip?.checkin_interval_minutes || 5
+  );
 
-  // Update elapsed time continuously (every second)
+  // ============= Panic Button Handlers (same logic as CustomTabBar) =============
+  const handlePanicActivate = useCallback(() => {
+    setPanicOverlayVisible(true);
+    setIsInCancelZoneState(false);
+    isInCancelZoneRef.current = false;
+    lastHapticDistance.current = Infinity;
+    hapticThrottleRef.current = 0;
+    setIsPanicTriggering(false);
+    setPanicTriggerComplete(false);
+  }, []);
+
+  const handlePanicRelease = useCallback(async () => {
+    const inCancelZone = isInCancelZoneRef.current;
+    
+    if (inCancelZone) {
+      // Abgebrochen - in Cancel Zone losgelassen
+      hapticFeedback('success');
+      logPanicEvent('cancelled');
+      stopAlarm();
+      setPanicOverlayVisible(false);
+      setIsInCancelZoneState(false);
+      isInCancelZoneRef.current = false;
+    } else {
+      // Alarm auslösen - außerhalb Cancel Zone losgelassen
+      if (isPanicTriggering) return;
+      
+      setIsPanicTriggering(true);
+      vibrateEmergency();
+      startAlarm();
+      
+      try {
+        let panicLocation: { latitude: number; longitude: number } | undefined;
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const currentLocation = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.High,
+            });
+            panicLocation = {
+              latitude: currentLocation.coords.latitude,
+              longitude: currentLocation.coords.longitude,
+            };
+          }
+        } catch (locError) {
+          console.error('Error getting location for panic:', locError);
+        }
+        
+        await triggerPanicAlarm(panicLocation);
+        
+        setPanicTriggerComplete(true);
+        
+        setTimeout(() => {
+          setPanicOverlayVisible(false);
+          setIsInCancelZoneState(false);
+          isInCancelZoneRef.current = false;
+          setIsPanicTriggering(false);
+          setPanicTriggerComplete(false);
+          
+          setTimeout(() => {
+            stopAlarm();
+          }, 30000);
+        }, 2500);
+        
+      } catch (error) {
+        console.error('Error triggering panic alarm:', error);
+        stopAlarm();
+        setIsPanicTriggering(false);
+        setPanicOverlayVisible(false);
+      }
+    }
+  }, [isPanicTriggering]);
+
+  const handlePanicDrag = useCallback((dx: number, dy: number) => {
+    const targetY = -(SCREEN_HEIGHT / 2 - 150);
+    const distanceToTarget = Math.abs(dy - targetY) + Math.abs(dx) * 0.5;
+    
+    const verticalThreshold = -(SCREEN_HEIGHT / 2 - 150);
+    const horizontalThreshold = 100;
+    const inZone = dy < verticalThreshold && Math.abs(dx) < horizontalThreshold;
+    
+    isInCancelZoneRef.current = inZone;
+    
+    const now = Date.now();
+    if (now - hapticThrottleRef.current > 100) {
+      const maxDistance = 400;
+      const proximity = Math.max(0, 1 - distanceToTarget / maxDistance);
+      
+      if (proximity > 0.3) {
+        if (proximity > 0.9 || inZone) {
+          hapticFeedback('heavy');
+          hapticThrottleRef.current = now;
+        } else if (proximity > 0.7) {
+          hapticFeedback('medium');
+          hapticThrottleRef.current = now;
+        } else if (proximity > 0.5 && distanceToTarget < lastHapticDistance.current - 30) {
+          hapticFeedback('light');
+          hapticThrottleRef.current = now;
+          lastHapticDistance.current = distanceToTarget;
+        }
+      }
+    }
+    
+    if (inZone !== isInCancelZoneState) {
+      setIsInCancelZoneState(inZone);
+    }
+  }, [isInCancelZoneState]);
+
+  // ============= Regular Handlers =============
+
+  // Fade in on mount
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 500,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  // Pulse animation when urgent
+  useEffect(() => {
+    if (timerState.state === 'urgent') {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.05,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulse.start();
+      return () => pulse.stop();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [timerState.state]);
+
+  // Update elapsed time
   useEffect(() => {
     if (!activeTrip) {
       setElapsedSeconds(0);
@@ -114,97 +335,60 @@ export default function ActiveTripScreen() {
     
     const updateElapsed = () => {
       const now = Date.now();
-      const elapsed = Math.floor((now - startTime) / 1000); // in seconds
+      const elapsed = Math.floor((now - startTime) / 1000);
       setElapsedSeconds(elapsed);
     };
 
-    // Update immediately
     updateElapsed();
-    
-    // Then update every second for smooth time display
     const interval = setInterval(updateElapsed, 1000);
 
     return () => clearInterval(interval);
   }, [activeTrip]);
 
-  // Load route points when trip changes
-  useEffect(() => {
-    if (!activeTrip) {
-      setRoutePoints([]);
-      setRouteDistance(0);
-      return;
-    }
-
-    const loadRoutePoints = async () => {
-      setIsLoadingRoute(true);
-      try {
-        const { data, error } = await routeService.getRoutePoints(activeTrip.id);
-        
-        if (error) {
-          console.error('Error loading route points:', error);
-          return;
-        }
-
-        if (data) {
-          setRoutePoints(data);
-          
-          // Calculate distance
-          const distance = routeService.calculateRouteDistance(data);
-          setRouteDistance(distance);
-        }
-      } catch (err) {
-        console.error('Error loading route points:', err);
-      } finally {
-        setIsLoadingRoute(false);
+  // Refresh route on focus
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTrip && !isEscalated) {
+        refreshRoutePoints().catch(console.error);
       }
-    };
+    }, [activeTrip, isEscalated, refreshRoutePoints])
+  );
 
-    loadRoutePoints();
-    
-    // Refresh route points every 5 seconds during active trip
-    const interval = setInterval(loadRoutePoints, 5000);
-    
-    return () => clearInterval(interval);
-  }, [activeTrip?.id]);
-
-  // Start location watching when trip is active (or escalated - continue tracking)
+  // Location tracking
   useEffect(() => {
     if (!activeTrip) {
       stopWatchingLocation();
       return;
     }
 
-    // Continue location tracking for active and escalated trips
     if (activeTrip.mode === 'continuous' || activeTrip.mode === 'interval') {
       startWatchingLocation((newLocation) => {
-        // Update location with metadata for route recording
         updateLocation(
           newLocation.coords.latitude,
           newLocation.coords.longitude,
           {
             accuracy: newLocation.coords.accuracy ?? undefined,
             altitude: newLocation.coords.altitude ?? undefined,
-            heading: newLocation.coords.heading !== null && newLocation.coords.heading !== undefined 
-              ? newLocation.coords.heading 
-              : undefined,
-            speed: newLocation.coords.speed !== null && newLocation.coords.speed !== undefined
-              ? newLocation.coords.speed
-              : undefined,
+            heading: newLocation.coords.heading ?? undefined,
+            speed: newLocation.coords.speed ?? undefined,
           }
         );
+
+        addRoutePoint({
+          latitude: newLocation.coords.latitude,
+          longitude: newLocation.coords.longitude,
+          accuracy: newLocation.coords.accuracy ?? null,
+          timestamp: newLocation.timestamp ?? Date.now(),
+        }).catch(console.error);
       });
     }
 
-    return () => {
-      stopWatchingLocation();
-    };
+    return () => stopWatchingLocation();
   }, [activeTrip]);
 
-  // Show check-in modal when pending check-in is created
-  // Also check if check-in is still pending before showing (in case it was answered via notification)
+  // Check-in modal handling
   useEffect(() => {
     if (pendingCheckin) {
-      // Verify the check-in is still pending before showing modal
       const verifyAndShow = async () => {
         if (!activeTrip) return;
         
@@ -215,85 +399,69 @@ export default function ActiveTripScreen() {
           if (isStillPending) {
             setCheckinModalVisible(true);
           } else {
-            // Check-in was already answered (e.g., via notification), refresh state
-            console.log('[Active Trip] Check-in already answered, refreshing state');
             await refreshPendingCheckin();
             setCheckinModalVisible(false);
           }
         } catch (error) {
-          console.error('[Active Trip] Error verifying check-in status:', error);
-          // On error, show modal anyway (better safe than sorry)
           setCheckinModalVisible(true);
         }
       };
       
       verifyAndShow();
     } else {
-      // No pending check-in, close modal
       setCheckinModalVisible(false);
     }
   }, [pendingCheckin, activeTrip, refreshPendingCheckin]);
 
-  // Refresh pending check-in state when screen comes into focus
-  // This ensures state is up-to-date if check-in was answered via notification
+  // Refresh check-in on focus
   useFocusEffect(
     useCallback(() => {
       if (activeTrip && !isEscalated) {
-        refreshPendingCheckin().catch((error) => {
-          console.error('[Active Trip] Error refreshing check-in on focus:', error);
-        });
+        refreshPendingCheckin().catch(console.error);
       }
     }, [activeTrip, isEscalated, refreshPendingCheckin])
   );
 
   async function handleRespondToCheckin(response: 'ok' | 'help') {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await respondToCheckin(response);
     setCheckinModalVisible(false);
   }
 
   async function handleCompleteTrip() {
-    // Prevent double completion
-    if (isCompletingRef.current) {
-      return;
-    }
+    if (isCompletingRef.current) return;
 
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
     Alert.alert(
-      "I'm Safe",
-      'Are you sure you want to end this trip?',
+      'Trip beenden',
+      'Bist du sicher angekommen?',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Abbrechen', style: 'cancel' },
         {
-          text: "Yes",
+          text: 'Ja, ich bin sicher',
           style: 'default',
           onPress: async () => {
-            if (isCompletingRef.current) {
-              return;
-            }
+            if (isCompletingRef.current) return;
 
             try {
               isCompletingRef.current = true;
-
-              // Stop location watching
-              stopWatchingLocation();
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               
-              // Stop background location tracking
+              stopWatchingLocation();
               await stopBackgroundLocationTracking();
               
-              // Complete the trip
               const { success } = await completeTrip();
               
               if (success) {
-                // Navigate to home immediately
-                // Don't rely on useEffect - navigate directly
                 router.replace('/(tabs)');
               } else {
                 isCompletingRef.current = false;
-                Alert.alert('Error', 'Failed to end trip. Please try again.');
+                Alert.alert('Fehler', 'Trip konnte nicht beendet werden.');
               }
             } catch (error) {
-              console.error('Error completing trip:', error);
               isCompletingRef.current = false;
-              Alert.alert('Error', 'Something went wrong. Please try again.');
+              Alert.alert('Fehler', 'Etwas ist schiefgelaufen.');
             }
           },
         },
@@ -302,17 +470,17 @@ export default function ActiveTripScreen() {
   }
 
   async function handleNeedHelp() {
-    if (!activeTrip || isEscalated) {
-      return;
-    }
+    if (!activeTrip || isEscalated) return;
 
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    
     Alert.alert(
-      '🚨 Need Help?',
-      'This will immediately notify your emergency contacts and mark this trip as escalated. Continue?',
+      '🚨 Hilfe anfordern?',
+      'Deine Notfallkontakte werden sofort benachrichtigt.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Abbrechen', style: 'cancel' },
         {
-          text: 'Yes, Send Alert',
+          text: 'Ja, Alarm senden',
           style: 'destructive',
           onPress: async () => {
             setIsEscalating(true);
@@ -320,26 +488,22 @@ export default function ActiveTripScreen() {
               const { error } = await tripService.escalateTrip(activeTrip.id);
               
               if (error) {
-                Alert.alert('Error', error.error || 'Failed to send alert. Please try again.');
+                Alert.alert('Fehler', 'Alarm konnte nicht gesendet werden.');
                 setIsEscalating(false);
                 return;
               }
 
-              // Send escalation notification to device
               await sendEscalationNotification();
-
-              // Refresh trip to get updated status
               await refreshActiveTrip();
 
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               Alert.alert(
-                'Alert Sent',
-                'Your emergency contacts have been notified and will be alerted about your situation.',
-                [{ text: 'OK', style: 'default' }],
-                { cancelable: false }
+                'Alarm gesendet',
+                'Deine Notfallkontakte wurden benachrichtigt.',
+                [{ text: 'OK' }]
               );
             } catch (error) {
-              console.error('Error escalating trip:', error);
-              Alert.alert('Error', 'Something went wrong. Please try again.');
+              Alert.alert('Fehler', 'Etwas ist schiefgelaufen.');
             } finally {
               setIsEscalating(false);
             }
@@ -349,19 +513,44 @@ export default function ActiveTripScreen() {
     );
   }
 
-  // Show loading if no active trip (useEffect will handle navigation)
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const page = Math.round(offsetX / PAGE_WIDTH);
+    if (page !== currentPage) {
+      setCurrentPage(page);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
+  // Loading state
   if (!activeTrip) {
     return (
-      <GestureHandlerRootView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#5170FF" />
+          <ActivityIndicator size="large" color={colors.primary[500]} />
+          <Text style={styles.loadingText}>Trip wird geladen...</Text>
         </View>
-      </GestureHandlerRootView>
+      </View>
     );
   }
 
+  // Calculate progress percentage for timer ring
+  const progressPercentage = timeUntilNextCheckin !== null && activeTrip
+    ? 1 - (timeUntilNextCheckin / (activeTrip.checkin_interval_minutes * 60))
+    : 0;
+
   return (
-    <GestureHandlerRootView style={styles.container}>
+    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+      {/* Panic Overlay - fullscreen mode for this screen */}
+      <PanicOverlay
+        visible={panicOverlayVisible}
+        isInCancelZone={isInCancelZoneState}
+        isTriggering={isPanicTriggering}
+        triggerComplete={panicTriggerComplete}
+        fullscreen
+      />
+
+      {/* Map Background */}
       <MapViewWrapper
         userLocation={
           location
@@ -376,6 +565,16 @@ export default function ActiveTripScreen() {
               }
             : undefined
         }
+        userAvatar={profile?.avatar_url || null}
+        userName={profile?.full_name || profile?.username || null}
+        origin={
+          activeTrip.origin_latitude && activeTrip.origin_longitude
+            ? {
+                latitude: activeTrip.origin_latitude,
+                longitude: activeTrip.origin_longitude,
+              }
+            : undefined
+        }
         destination={
           activeTrip.destination_latitude && activeTrip.destination_longitude
             ? {
@@ -386,7 +585,7 @@ export default function ActiveTripScreen() {
         }
         routePoints={
           routePoints && routePoints.length > 0
-            ? routePoints.map((point: routeService.RoutePoint) => ({
+            ? routePoints.map((point) => ({
                 latitude: point.latitude,
                 longitude: point.longitude,
               }))
@@ -394,144 +593,358 @@ export default function ActiveTripScreen() {
         }
       />
 
-      <BottomSheet
-        ref={bottomSheetRef}
-        index={1}
-        snapPoints={snapPoints}
-        enablePanDownToClose={false}
-        backgroundStyle={styles.bottomSheetBackground}
-        handleIndicatorStyle={styles.handleIndicator}>
-        <BottomSheetView style={styles.contentContainer}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <IconSymbol name="chevron.left" size={24} color="#fff" />
-            </TouchableOpacity>
-            {isEscalated ? (
-              <View style={[styles.statusBadge, styles.escalatedBadge]}>
-                <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#fff" />
-                <Text style={styles.statusText}>Emergency Escalated</Text>
-              </View>
-            ) : (
-              <View style={styles.statusBadge}>
-                <View style={styles.statusDot} />
-                <Text style={styles.statusText}>Trip Active</Text>
-              </View>
-            )}
-            <View style={{ width: 40 }} />
-          </View>
-          
-          {/* Escalation Alert Banner */}
-          {isEscalated && (
-            <View style={styles.escalationBanner}>
-              <IconSymbol name="exclamationmark.triangle.fill" size={20} color="#fff" />
-              <Text style={styles.escalationBannerText}>
-                Emergency contacts have been notified
-              </Text>
+      {/* Floating Header */}
+      <SafeAreaView style={styles.headerContainer} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity 
+            onPress={() => router.back()} 
+            style={styles.backButton}
+            activeOpacity={0.8}
+          >
+            <IconSymbol name="chevron.left" size={20} color={colors.text.primary} />
+          </TouchableOpacity>
+
+          {isEscalated ? (
+            <View style={[styles.statusBadge, styles.escalatedBadge]}>
+              <View style={styles.statusDot} />
+              <Text style={styles.statusTextEscalated}>NOTFALL</Text>
+            </View>
+          ) : (
+            <View style={styles.statusBadge}>
+              <View style={[styles.statusDot, { backgroundColor: colors.success.main }]} />
+              <Text style={styles.statusText}>Unterwegs</Text>
             </View>
           )}
 
-          {/* Time Display */}
-          <View style={styles.timeCard}>
-            <IconSymbol name="clock.fill" size={28} color="#fff" />
-            <View style={styles.timeContent}>
-              <Text style={styles.timeLabel}>Elapsed Time</Text>
-              <Text style={styles.timeValue}>{formatDurationWithSeconds(elapsedSeconds)}</Text>
-            </View>
+          <View style={styles.elapsedBadge}>
+            <Text style={styles.elapsedText}>{formatDuration(elapsedSeconds)}</Text>
           </View>
+        </View>
+      </SafeAreaView>
 
-          {/* Route Stats */}
-          {routePoints.length > 0 && (
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <IconSymbol name="figure.walk" size={20} color="#fff" />
+      {/* Bottom Sheet with Swipeable Pages */}
+      <SafeAreaView style={styles.bottomSheet} edges={['bottom']}>
+        <View style={styles.handleContainer}>
+          <View style={styles.handle} />
+        </View>
+
+        {/* Page Indicators */}
+        <View style={styles.pageIndicators}>
+          <View style={[styles.pageIndicator, currentPage === 0 && styles.pageIndicatorActive]} />
+          <View style={[styles.pageIndicator, currentPage === 1 && styles.pageIndicatorActive]} />
+          <View style={[styles.pageIndicator, currentPage === 2 && styles.pageIndicatorActive]} />
+        </View>
+
+        {/* Swipeable Content */}
+        <ScrollView
+          ref={scrollViewRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          decelerationRate="fast"
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollViewContent}
+          scrollEnabled={!panicOverlayVisible}
+        >
+          {/* Page 1: Status & Quick Actions */}
+          <View style={[styles.page, { width: PAGE_WIDTH }]}>
+            {/* Emergency Banner */}
+            {isEscalated && (
+              <View style={styles.emergencyBanner}>
+                <IconSymbol name="exclamationmark.triangle.fill" size={20} color="#fff" />
+                <Text style={styles.emergencyText}>
+                  Notfallkontakte wurden benachrichtigt
+                </Text>
+              </View>
+            )}
+
+            {/* Hero: Check-in Timer */}
+            {!isEscalated && activeTrip.mode !== 'silent' && (
+              <Animated.View style={[styles.timerContainer, { transform: [{ scale: pulseAnim }] }]}>
+                <View style={[styles.timerRing, { borderColor: colors.neutral[100] }]}>
+                  <View 
+                    style={[
+                      styles.timerRingProgress, 
+                      { 
+                        borderColor: timerState.color,
+                        opacity: progressPercentage > 0 ? 1 : 0,
+                      }
+                    ]} 
+                  />
+                  <View style={styles.timerContent}>
+                    <Text style={[styles.timerValue, { color: timerState.color }]}>
+                      {timeUntilNextCheckin !== null ? formatTime(timeUntilNextCheckin) : '--:--'}
+                    </Text>
+                    <Text style={styles.timerLabel}>
+                      {timerState.state === 'urgent' ? 'Check-in jetzt!' : 'Nächster Check-in'}
+                    </Text>
+                  </View>
+                </View>
+              </Animated.View>
+            )}
+
+            {/* Silent Mode Info */}
+            {activeTrip.mode === 'silent' && !isEscalated && (
+              <View style={styles.silentModeCard}>
+                <View style={styles.silentModeIcon}>
+                  <IconSymbol name="moon.fill" size={28} color={colors.primary[500]} />
+                </View>
+                <View style={styles.silentModeContent}>
+                  <Text style={styles.silentModeTitle}>Stiller Modus</Text>
+                  <Text style={styles.silentModeSubtitle}>Keine Check-ins erforderlich</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Trip Stats */}
+            <View style={styles.statsContainer}>
+              <View style={styles.statCard}>
+                <IconSymbol name="figure.walk" size={20} color={colors.primary[500]} />
                 <View style={styles.statContent}>
-                  <Text style={styles.statLabel}>Distance</Text>
                   <Text style={styles.statValue}>
                     {routeDistance >= 1000
-                      ? `${(routeDistance / 1000).toFixed(2)} km`
+                      ? `${(routeDistance / 1000).toFixed(1)} km`
                       : `${Math.round(routeDistance)} m`}
                   </Text>
+                  <Text style={styles.statLabel}>Distanz</Text>
                 </View>
               </View>
-              <View style={styles.statItem}>
-                <IconSymbol name="mappin.circle.fill" size={20} color="#fff" />
+              
+              <View style={styles.statCard}>
+                <IconSymbol name="shield.fill" size={20} color={colors.success.main} />
                 <View style={styles.statContent}>
-                  <Text style={styles.statLabel}>Points</Text>
-                  <Text style={styles.statValue}>{routePoints.length}</Text>
+                  <Text style={styles.statValue}>
+                    {activeTrip.mode === 'interval' ? `${activeTrip.checkin_interval_minutes}m` : 
+                     activeTrip.mode === 'silent' ? 'Aus' : 'Aktiv'}
+                  </Text>
+                  <Text style={styles.statLabel}>Intervall</Text>
                 </View>
               </View>
             </View>
-          )}
 
-          {/* Trip Info */}
-          <View style={styles.infoRow}>
-            <View style={styles.infoItem}>
-              <IconSymbol name="shield.fill" size={18} color="#fff" />
-              <Text style={styles.infoText}>
-                {activeTrip.mode.charAt(0).toUpperCase() + activeTrip.mode.slice(1)}
+            {/* Swipe Hint */}
+            <View style={styles.swipeHint}>
+              <IconSymbol name="chevron.right.2" size={16} color={colors.text.tertiary} />
+              <Text style={styles.swipeHintText}>Wische für SOS</Text>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.actionsContainer}>
+              {!isEscalated && (
+                <TouchableOpacity
+                  style={styles.helpButton}
+                  onPress={handleNeedHelp}
+                  disabled={isLoading || isEscalating}
+                  activeOpacity={0.9}
+                >
+                  {isEscalating ? (
+                    <ActivityIndicator color={colors.error.main} />
+                  ) : (
+                    <>
+                      <IconSymbol name="exclamationmark.triangle.fill" size={20} color={colors.error.main} />
+                      <Text style={styles.helpButtonText}>Hilfe</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[styles.endTripButton, isEscalated && styles.endTripButtonFull]}
+                onPress={handleCompleteTrip}
+                disabled={isLoading || isCompletingRef.current}
+                activeOpacity={0.9}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <IconSymbol name="checkmark.circle.fill" size={22} color="#fff" />
+                    <Text style={styles.endTripButtonText}>Sicher angekommen</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Page 2: SOS & Info */}
+          <View style={[styles.page, { width: PAGE_WIDTH }]}>
+            {/* Page Title */}
+            <View style={styles.pageTitleContainer}>
+              <Text style={styles.pageTitle}>Notfall</Text>
+              <Text style={styles.pageSubtitle}>
+                3 Sekunden gedrückt halten für Alarm
               </Text>
             </View>
-            {activeTrip.mode !== 'silent' && (
-              <View style={styles.infoItem}>
-                <IconSymbol name="bell.fill" size={18} color="#fff" />
-                <Text style={styles.infoText}>
-                  {timeUntilNextCheckin !== null
-                    ? `${Math.floor(timeUntilNextCheckin / 60)}:${(timeUntilNextCheckin % 60).toString().padStart(2, '0')}`
-                    : `${activeTrip.checkin_interval_minutes}min`}
-                </Text>
-              </View>
-            )}
-            {missedCheckinsCount > 0 && (
-              <View style={[styles.infoItem, styles.missedCheckinItem]}>
-                <IconSymbol name="exclamationmark.triangle.fill" size={18} color="#fff" />
-                <Text style={[styles.infoText, styles.missedCheckinText]}>
-                  {missedCheckinsCount} missed
-                </Text>
-              </View>
-            )}
-            {activeTrip.safetogether_enabled && (
-              <View style={styles.infoItem}>
-                <IconSymbol name="person.2.fill" size={18} color="#fff" />
-                <Text style={styles.infoText}>Active</Text>
-              </View>
-            )}
-          </View>
 
-          {/* Action Buttons */}
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={[styles.helpButton, (isEscalated || isLoading || isEscalating) && styles.buttonDisabled]}
-              onPress={handleNeedHelp}
-              disabled={isEscalated || isLoading || isEscalating}>
-              {isEscalating ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <IconSymbol name="exclamationmark.triangle.fill" size={22} color="#fff" />
-                  <Text style={styles.helpButtonText}>
-                    {isEscalated ? 'Alert Sent' : 'Need Help'}
+            {/* SOS Button - same approach as in tab bar */}
+            <View style={[
+              styles.sosButtonContainer,
+              panicOverlayVisible && styles.sosButtonContainerActive,
+            ]}>
+              <PanicButton
+                size={SOS_BUTTON_SIZE}
+                onActivate={handlePanicActivate}
+                onRelease={handlePanicRelease}
+                onDrag={handlePanicDrag}
+                disabled={isPanicTriggering}
+                isOverlayActive={panicOverlayVisible}
+              />
+            </View>
+
+            {/* Trip Info Cards */}
+            <View style={styles.infoCardsContainer}>
+              {/* Guardian Info */}
+              {activeTrip.safetogether_enabled && (
+                <View style={styles.infoCard}>
+                  <View style={styles.infoCardIcon}>
+                    <IconSymbol name="person.2.fill" size={18} color={colors.primary[500]} />
+                  </View>
+                  <View style={styles.infoCardContent}>
+                    <Text style={styles.infoCardTitle}>Guardian aktiv</Text>
+                    <Text style={styles.infoCardSubtitle}>Begleitet deinen Trip</Text>
+                  </View>
+                  <View style={[styles.statusDotSmall, { backgroundColor: colors.success.main }]} />
+                </View>
+              )}
+
+              {/* Missed Check-ins Warning */}
+              {missedCheckinsCount > 0 && (
+                <View style={[styles.infoCard, styles.infoCardWarning]}>
+                  <View style={[styles.infoCardIcon, { backgroundColor: colors.error.light }]}>
+                    <IconSymbol name="exclamationmark.triangle.fill" size={18} color={colors.error.main} />
+                  </View>
+                  <View style={styles.infoCardContent}>
+                    <Text style={[styles.infoCardTitle, { color: colors.error.main }]}>
+                      {missedCheckinsCount} Check-in verpasst
+                    </Text>
+                    <Text style={styles.infoCardSubtitle}>Bitte checke bald ein</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Route Info */}
+              <View style={styles.infoCard}>
+                <View style={styles.infoCardIcon}>
+                  <IconSymbol name="location.fill" size={18} color={colors.success.main} />
+                </View>
+                <View style={styles.infoCardContent}>
+                  <Text style={styles.infoCardTitle}>
+                    {activeTrip.destination_address 
+                      ? activeTrip.destination_address.split(',')[0] 
+                      : 'Ziel'}
                   </Text>
-                </>
-              )}
-            </TouchableOpacity>
+                  <Text style={styles.infoCardSubtitle}>
+                    {routeDistance >= 1000
+                      ? `${(routeDistance / 1000).toFixed(1)} km zurückgelegt`
+                      : `${Math.round(routeDistance)} m zurückgelegt`}
+                  </Text>
+                </View>
+              </View>
+            </View>
 
-            <TouchableOpacity
-              style={[styles.safeButton, isLoading && styles.buttonDisabled]}
-              onPress={handleCompleteTrip}
-              disabled={isLoading || isCompletingRef.current}>
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <IconSymbol name="checkmark.circle.fill" size={22} color="#fff" />
-                  <Text style={styles.safeButtonText}>End Trip</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            {/* Back Hint */}
+            <View style={styles.swipeHintLeft}>
+              <IconSymbol name="chevron.left.2" size={16} color={colors.text.tertiary} />
+              <Text style={styles.swipeHintText}>Zurück zum Status</Text>
+            </View>
+
+            {/* Forward Hint */}
+            <View style={styles.swipeHint}>
+              <Text style={styles.swipeHintText}>Guardians</Text>
+              <IconSymbol name="chevron.right.2" size={16} color={colors.text.tertiary} />
+            </View>
           </View>
-        </BottomSheetView>
-      </BottomSheet>
+
+          {/* Page 3: Guardians List */}
+          <View style={[styles.page, { width: PAGE_WIDTH }]}>
+            {/* Page Title */}
+            <View style={styles.pageTitleContainer}>
+              <Text style={styles.pageTitle}>Deine Guardians</Text>
+              <Text style={styles.pageSubtitle}>
+                {tripGuardians.filter(g => g.status !== 'declined').length} Personen begleiten dich
+              </Text>
+            </View>
+
+            {/* Guardians List */}
+            <View style={styles.guardiansListContainer}>
+              {tripGuardians.map((guardian) => (
+                <View key={guardian.id} style={styles.guardianListItem}>
+                  {/* Avatar */}
+                  <View style={[
+                    styles.guardianAvatar,
+                    guardian.status === 'declined' && styles.guardianAvatarDeclined,
+                  ]}>
+                    <Text style={styles.guardianAvatarText}>
+                      {(guardian.guardian?.full_name || guardian.guardian?.username || '?')[0].toUpperCase()}
+                    </Text>
+                  </View>
+
+                  {/* Info */}
+                  <View style={styles.guardianListItemInfo}>
+                    <Text style={[
+                      styles.guardianListItemName,
+                      guardian.status === 'declined' && styles.guardianListItemNameDeclined,
+                    ]}>
+                      {guardian.guardian?.full_name || guardian.guardian?.username || 'Guardian'}
+                    </Text>
+                    <Text style={styles.guardianListItemUsername}>
+                      @{guardian.guardian?.username || 'unknown'}
+                    </Text>
+                  </View>
+
+                  {/* Status Badge */}
+                  <View style={[
+                    styles.guardianStatusBadge,
+                    guardian.status === 'accepted' && styles.guardianStatusAccepted,
+                    guardian.status === 'requested' && styles.guardianStatusRequested,
+                    guardian.status === 'declined' && styles.guardianStatusDeclined,
+                  ]}>
+                    <IconSymbol 
+                      name={
+                        guardian.status === 'accepted' ? 'checkmark.circle.fill' :
+                        guardian.status === 'declined' ? 'xmark.circle.fill' :
+                        'clock.fill'
+                      } 
+                      size={14} 
+                      color={
+                        guardian.status === 'accepted' ? colors.success.main :
+                        guardian.status === 'declined' ? colors.error.main :
+                        colors.warning.main
+                      } 
+                    />
+                    <Text style={[
+                      styles.guardianStatusText,
+                      guardian.status === 'accepted' && styles.guardianStatusTextAccepted,
+                      guardian.status === 'requested' && styles.guardianStatusTextRequested,
+                      guardian.status === 'declined' && styles.guardianStatusTextDeclined,
+                    ]}>
+                      {guardian.status === 'accepted' ? 'Akzeptiert' :
+                       guardian.status === 'declined' ? 'Abgelehnt' :
+                       'Angefragt'}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {/* Info Text */}
+            <View style={styles.guardianInfoBox}>
+              <IconSymbol name="info.circle.fill" size={18} color={colors.primary[500]} />
+              <Text style={styles.guardianInfoText}>
+                Guardians die akzeptiert oder noch nicht geantwortet haben, erhalten Updates zu deinem Trip.
+              </Text>
+            </View>
+
+            {/* Back Hint */}
+            <View style={styles.swipeHintLeft}>
+              <IconSymbol name="chevron.left.2" size={16} color={colors.text.tertiary} />
+              <Text style={styles.swipeHintText}>Zurück zum SOS</Text>
+            </View>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
 
       {/* Check-in Modal */}
       <CheckinModal
@@ -540,195 +953,507 @@ export default function ActiveTripScreen() {
         onRespond={handleRespondToCheckin}
         onClose={() => setCheckinModalVisible(false)}
       />
-    </GestureHandlerRootView>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.neutral[900],
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: spacing.lg,
   },
-  bottomSheetBackground: {
-    backgroundColor: '#5170FF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+  loadingText: {
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.medium,
+    color: colors.text.secondary,
   },
-  handleIndicator: {
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    width: 40,
-  },
-  contentContainer: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingBottom: 24,
+
+  // Header
+  headerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 44,
+    height: 44,
+    borderRadius: radii.full,
+    backgroundColor: colors.neutral[0],
     justifyContent: 'center',
     alignItems: 'center',
+    ...shadows.lg,
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    backgroundColor: colors.neutral[0],
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.full,
+    gap: spacing.sm,
+    ...shadows.md,
   },
   statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#4CAF50',
-    marginRight: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.success.main,
+  },
+  statusDotSmall: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   statusText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.semibold,
+    color: colors.text.primary,
+  },
+  statusTextEscalated: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.bold,
     color: '#fff',
+    letterSpacing: 0.5,
   },
   escalatedBadge: {
-    backgroundColor: 'rgba(255, 59, 48, 0.3)',
-    gap: 6,
+    backgroundColor: colors.error.main,
   },
-  escalationBanner: {
-    flexDirection: 'row',
+  elapsedBadge: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.full,
+    ...shadows.sm,
+  },
+  elapsedText: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.semibold,
+    color: colors.text.secondary,
+  },
+
+  // Bottom Sheet
+  bottomSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radii['3xl'],
+    borderTopRightRadius: radii['3xl'],
+    ...shadows.xl,
+    paddingBottom: spacing.lg,
+    maxHeight: SCREEN_HEIGHT * 0.55,
+  },
+  handleContainer: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 59, 48, 0.3)',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 16,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 59, 48, 0.5)',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
-  escalationBannerText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.neutral[200],
+  },
+
+  // Page Indicators
+  pageIndicators: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  pageIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.neutral[200],
+  },
+  pageIndicatorActive: {
+    backgroundColor: colors.primary[500],
+    width: 24,
+  },
+
+  // ScrollView
+  scrollView: {
     flex: 1,
   },
-  timeCard: {
+  scrollViewContent: {
+    flexGrow: 1,
+  },
+
+  // Page
+  page: {
+    paddingHorizontal: spacing.xl,
+  },
+
+  // Emergency Banner
+  emergencyBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
+    backgroundColor: colors.error.main,
+    padding: spacing.lg,
+    borderRadius: radii.xl,
+    marginBottom: spacing.lg,
+    gap: spacing.md,
   },
-  timeContent: {
-    marginLeft: 12,
-  },
-  timeLabel: {
-    fontSize: 12,
-    color: '#fff',
-    opacity: 0.9,
-    marginBottom: 2,
-  },
-  timeValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
+  emergencyText: {
+    flex: 1,
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.semibold,
     color: '#fff',
   },
-  statsRow: {
+
+  // Timer
+  timerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
+  timerRing: {
+    width: TIMER_SIZE,
+    height: TIMER_SIZE,
+    borderRadius: TIMER_SIZE / 2,
+    borderWidth: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.neutral[0],
+  },
+  timerRingProgress: {
+    position: 'absolute',
+    width: TIMER_SIZE,
+    height: TIMER_SIZE,
+    borderRadius: TIMER_SIZE / 2,
+    borderWidth: 8,
+    borderTopColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'transparent',
+  },
+  timerContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timerValue: {
+    fontSize: 40,
+    fontWeight: typography.weight.bold,
+    letterSpacing: -1,
+  },
+  timerLabel: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.medium,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+  },
+
+  // Silent Mode
+  silentModeCard: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
+    alignItems: 'center',
+    backgroundColor: colors.primary[50],
+    padding: spacing.lg,
+    borderRadius: radii.xl,
+    marginBottom: spacing.lg,
+    gap: spacing.md,
   },
-  statItem: {
+  silentModeIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.md,
+    backgroundColor: colors.neutral[0],
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...shadows.sm,
+  },
+  silentModeContent: {
+    flex: 1,
+  },
+  silentModeTitle: {
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.semibold,
+    color: colors.text.primary,
+  },
+  silentModeSubtitle: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.regular,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+
+  // Stats
+  statsContainer: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.md,
+  },
+  statCard: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    padding: 12,
-    borderRadius: 10,
-    gap: 10,
+    backgroundColor: colors.neutral[50],
+    padding: spacing.md,
+    borderRadius: radii.xl,
+    gap: spacing.sm,
   },
   statContent: {
     flex: 1,
   },
-  statLabel: {
-    fontSize: 11,
-    color: '#fff',
-    opacity: 0.8,
-    marginBottom: 2,
-  },
   statValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.bold,
+    color: colors.text.primary,
   },
-  infoRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 20,
+  statLabel: {
+    fontSize: typography.size.xs,
+    fontWeight: typography.weight.medium,
+    color: colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
-  infoItem: {
+
+  // Swipe Hint
+  swipeHint: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    gap: 6,
+    justifyContent: 'flex-end',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
   },
-  infoText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#fff',
+  swipeHintLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: spacing.xs,
+    marginTop: spacing.lg,
   },
-  missedCheckinItem: {
-    backgroundColor: 'rgba(255, 59, 48, 0.3)',
+  swipeHintText: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.medium,
+    color: colors.text.tertiary,
   },
-  missedCheckinText: {
-    color: '#fff',
-  },
-  actions: {
-    gap: 10,
+
+  // Actions
+  actionsContainer: {
+    flexDirection: 'row',
+    gap: spacing.md,
   },
   helpButton: {
     flexDirection: 'row',
-    backgroundColor: '#FF3B30',
-    paddingVertical: 14,
-    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    backgroundColor: colors.error.light,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.full,
+    gap: spacing.sm,
+    borderWidth: 1.5,
+    borderColor: `${colors.error.main}30`,
   },
   helpButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.semibold,
+    color: colors.error.main,
   },
-  safeButton: {
+  endTripButton: {
+    flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#34C759',
-    paddingVertical: 14,
-    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    backgroundColor: colors.success.main,
+    paddingVertical: spacing.md,
+    borderRadius: radii.full,
+    gap: spacing.sm,
+    ...shadows.md,
+    shadowColor: colors.success.main,
+    shadowOpacity: 0.3,
   },
-  safeButtonText: {
+  endTripButtonFull: {
+    flex: 1,
+  },
+  endTripButtonText: {
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.semibold,
     color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
   },
-  buttonDisabled: {
+
+  // Page 2: SOS
+  pageTitleContainer: {
+    alignItems: 'center',
+    marginBottom: spacing.xl,
+  },
+  pageTitle: {
+    fontSize: typography.size['2xl'],
+    fontWeight: typography.weight.bold,
+    color: colors.text.primary,
+  },
+  pageSubtitle: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.regular,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+  },
+
+  // SOS Placeholder in ScrollView - keeps layout consistent
+  // SOS Button Container - same approach as tab bar
+  sosButtonContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xl,
+    zIndex: 1,
+  },
+  sosButtonContainerActive: {
+    zIndex: 10001,
+    elevation: 10001,
+  },
+
+  // Info Cards
+  infoCardsContainer: {
+    gap: spacing.md,
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.neutral[50],
+    padding: spacing.md,
+    borderRadius: radii.xl,
+    gap: spacing.md,
+  },
+  infoCardWarning: {
+    backgroundColor: colors.error.light,
+    borderWidth: 1,
+    borderColor: `${colors.error.main}20`,
+  },
+  infoCardIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.md,
+    backgroundColor: colors.primary[50],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  infoCardContent: {
+    flex: 1,
+  },
+  infoCardTitle: {
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.semibold,
+    color: colors.text.primary,
+  },
+  infoCardSubtitle: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.regular,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+
+  // Page 3: Guardians List
+  guardiansListContainer: {
+    gap: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  guardianListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.neutral[50],
+    padding: spacing.md,
+    borderRadius: radii.xl,
+    gap: spacing.md,
+  },
+  guardianAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  guardianAvatarDeclined: {
+    backgroundColor: colors.neutral[200],
     opacity: 0.6,
+  },
+  guardianAvatarText: {
+    fontSize: typography.size.lg,
+    fontWeight: typography.weight.bold,
+    color: colors.primary[600],
+  },
+  guardianListItemInfo: {
+    flex: 1,
+  },
+  guardianListItemName: {
+    fontSize: typography.size.base,
+    fontWeight: typography.weight.semibold,
+    color: colors.text.primary,
+  },
+  guardianListItemNameDeclined: {
+    color: colors.text.tertiary,
+    textDecorationLine: 'line-through',
+  },
+  guardianListItemUsername: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.regular,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  guardianStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.full,
+    gap: spacing.xs,
+  },
+  guardianStatusAccepted: {
+    backgroundColor: colors.success.light,
+  },
+  guardianStatusRequested: {
+    backgroundColor: colors.warning.light,
+  },
+  guardianStatusDeclined: {
+    backgroundColor: colors.error.light,
+  },
+  guardianStatusText: {
+    fontSize: typography.size.xs,
+    fontWeight: typography.weight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  guardianStatusTextAccepted: {
+    color: colors.success.main,
+  },
+  guardianStatusTextRequested: {
+    color: colors.warning.main,
+  },
+  guardianStatusTextDeclined: {
+    color: colors.error.main,
+  },
+  guardianInfoBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.primary[50],
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  guardianInfoText: {
+    flex: 1,
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.regular,
+    color: colors.text.secondary,
+    lineHeight: 20,
   },
 });

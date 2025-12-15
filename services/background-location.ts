@@ -11,8 +11,34 @@ export interface BackgroundLocationData {
 // Define the background task
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
-    console.error('Background location error:', error);
-    return;
+    // Handle different error types
+    const errorCode = error?.code ?? -1;
+    const errorMessage = error?.message || 'Unknown error';
+    
+    // kCLErrorDomain Code=0 is "Location Unknown" - often a temporary error
+    // This can happen when location services are initializing or temporarily unavailable
+    // We should log it but not treat it as critical - continue if we have data
+    if (errorCode === 0) {
+      console.warn('Background location temporarily unavailable (Code 0):', errorMessage);
+      // Don't return early - try to continue with any available data
+    } else if (errorCode > 0) {
+      // Other errors (permission denied, etc.) are more critical
+      console.error('Background location error (Code', errorCode, '):', errorMessage);
+      
+      // For critical errors, we should stop trying
+      if (errorCode === 1) { // kCLErrorDenied
+        console.error('Location permission denied - background tracking may not work');
+        return;
+      }
+      
+      // If error is critical and no data available, return early
+      if (!data) {
+        return;
+      }
+    } else {
+      // Unknown error format - log and continue if data available
+      console.warn('Background location error (unknown format):', error);
+    }
   }
 
   if (data) {

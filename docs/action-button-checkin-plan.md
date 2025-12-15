@@ -431,3 +431,13 @@ ios/
    - Phase 1 als sofortige Lösung
    - Phase 2 als Premium-Feature für neueste iPhones
 
+
+
+
+
+
+
+
+
+
+

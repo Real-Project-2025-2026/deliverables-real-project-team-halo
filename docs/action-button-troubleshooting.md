@@ -102,3 +102,13 @@ Falls es immer noch nicht funktioniert, könnte es sein, dass:
 
 In diesem Fall: Prüfe die Build-Logs und stelle sicher, dass die Swift-Dateien im Build enthalten sind.
 
+
+
+
+
+
+
+
+
+
+

@@ -4,14 +4,16 @@ import { View } from 'react-native';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { CustomTabBar } from '@/components/custom-tab-bar';
 
 export default function TabLayout() {
 
   return (
     <Tabs
+      tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
-        tabBarActiveTintColor: '#ffffff',
-        tabBarInactiveTintColor: '#ffffff',
+        tabBarActiveTintColor: '#5170FF',
+        tabBarInactiveTintColor: '#999',
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarShowLabel: true,
@@ -19,9 +21,9 @@ export default function TabLayout() {
           <View
             style={{
               flex: 1,
-              backgroundColor: 'rgba(81, 112, 255, 0.9)',
+              backgroundColor: '#fff',
               borderTopWidth: 1,
-              borderTopColor: '#ffffff',
+              borderTopColor: '#e0e0e0',
             }}
           />
         ),
@@ -51,11 +53,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="abonnement"
+        name="guardian-trips"
         options={{
-          title: 'Subscription',
+          title: 'Trips',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={28} name={focused ? 'creditcard.fill' : 'creditcard'} color={color} />
+            <IconSymbol size={28} name={focused ? 'shield.fill' : 'shield'} color={color} />
           ),
         }}
       />
