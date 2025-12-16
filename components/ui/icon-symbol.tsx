@@ -15,9 +15,30 @@ type IconSymbolName = keyof typeof MAPPING;
  */
 const MAPPING = {
   'house.fill': 'home',
+  'house': 'home-outline',
+  'person.2.fill': 'people',
+  'person.2': 'people-outline',
+  'person.fill': 'person',
+  'person': 'person-outline',
+  'gearshape.fill': 'settings',
+  'gearshape': 'settings-outline',
+  'creditcard.fill': 'credit-card',
+  'creditcard': 'credit-card',
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
+  'checkmark': 'check',
+  // Panic Button Icons
+  'sos': 'warning',
+  'exclamationmark.triangle.fill': 'warning',
+  'xmark': 'close',
+  'hand.raised.fill': 'pan-tool',
+  'checkmark.shield.fill': 'verified-user',
+  'bell.fill': 'notifications',
+  'clock.fill': 'schedule',
+  'checkmark.circle.fill': 'check-circle',
+  'shield.fill': 'shield',
+  'shield': 'shield',
 } as IconMapping;
 
 /**
