@@ -18,3 +18,4 @@ CHECK (checkin_interval_minutes >= 1 AND checkin_interval_minutes <= 60);
 
 
 
+

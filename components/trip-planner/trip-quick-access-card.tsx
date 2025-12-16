@@ -5,23 +5,23 @@
  * Airbnb-inspiriertes Design mit Search-Metapher.
  */
 
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { colors, radii, shadows, spacing, touchTargets, typography } from '@/constants/design-tokens';
+import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import React from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
   Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import Animated, {
   useAnimatedStyle,
-  withSpring,
   useSharedValue,
+  withSpring,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { spacing, colors, typography, radii, shadows, touchTargets } from '@/constants/design-tokens';
 
 interface TripQuickAccessCardProps {
   /** Optional: Aktuelle Adresse als Kontext */
