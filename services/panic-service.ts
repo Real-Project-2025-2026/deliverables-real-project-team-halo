@@ -87,6 +87,23 @@ export async function triggerPanicAlarm(
     // Log the trigger event
     await logPanicEvent('triggered', location);
 
+    // 0. If user has an active trip, escalate it (but don't increment missed_checkins_count)
+    // This ensures Guardians see the escalation in their app
+    try {
+      const { getActiveTrip, escalateTrip } = await import('./trip-service');
+      const { data: activeTrip } = await getActiveTrip();
+      
+      if (activeTrip && activeTrip.status === 'active') {
+        // Escalate the trip (this will notify Guardians via escalation notification)
+        // missed_checkins_count stays at 0 (or current value) since we're not incrementing it
+        await escalateTrip(activeTrip.id);
+        console.log('[Panic Service] Escalated active trip due to panic button');
+      }
+    } catch (err) {
+      console.error('[Panic Service] Error escalating trip:', err);
+      // Don't fail panic alarm if trip escalation fails
+    }
+
     // 1. Get and notify emergency contacts
     const { data: emergencyContacts } = await getActiveEmergencyContactsForEscalation();
 

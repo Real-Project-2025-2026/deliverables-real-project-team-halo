@@ -123,20 +123,33 @@ export async function startTrip(
       guardiansAsRecipient?.forEach((g) => validatedGuardianIds.add(g.requester_id));
 
       // Create trip_guardians entries only for validated Guardians
+      // Initial status is 'requested' - guardians need to accept
       if (validatedGuardianIds.size > 0) {
         const tripGuardianInserts = Array.from(validatedGuardianIds).map((guardianId) => ({
           trip_id: data.id,
           guardian_id: guardianId,
+          status: 'requested', // Guardian needs to accept the request
         }));
 
-        const { error: tripGuardiansError } = await supabase
+        console.log('[TripService] Creating trip_guardians entries:', {
+          tripId: data.id,
+          guardianIds: Array.from(validatedGuardianIds),
+          inserts: tripGuardianInserts,
+        });
+
+        const { data: insertedData, error: tripGuardiansError } = await supabase
           .from('trip_guardians')
-          .insert(tripGuardianInserts);
+          .insert(tripGuardianInserts)
+          .select();
 
         if (tripGuardiansError) {
-          console.error('Error adding Guardians to trip:', tripGuardiansError);
+          console.error('[TripService] Error adding Guardians to trip:', tripGuardiansError);
           // Don't fail trip creation if Guardian insertion fails
+        } else {
+          console.log('[TripService] Successfully created trip_guardians:', insertedData);
         }
+      } else {
+        console.log('[TripService] No validated Guardians to add to trip');
       }
     }
 
@@ -457,11 +470,31 @@ export async function completeTrip(
       if (guardiansError) {
         console.warn('Error fetching trip guardians for notification:', guardiansError);
       } else if (tripGuardians && tripGuardians.length > 0) {
-        const userUsername = (await supabase
-          .from('profiles')
-          .select('username')
-          .eq('id', session.user.id)
-          .single()).data?.username || null;
+        // Ensure we have the user's name - fetch again if userName is still default
+        let finalUserName = userName;
+        let finalUserUsername: string | null = null;
+        
+        if (userName === 'A Halo user') {
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('full_name, username')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (profileData) {
+            finalUserName = profileData.full_name || profileData.username || null;
+            finalUserUsername = profileData.username || null;
+          }
+        } else {
+          // Get username separately for fallback
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('username')
+            .eq('id', session.user.id)
+            .single();
+          
+          finalUserUsername = profileData?.username || null;
+        }
 
         // Notify each Guardian
         const guardianNotifications = tripGuardians.map(async (tg) => {
@@ -470,8 +503,8 @@ export async function completeTrip(
             if (pushToken) {
               await sendGuardianTripEndNotification(
                 pushToken,
-                userName,
-                userUsername || 'Someone',
+                finalUserName || 'Someone',
+                finalUserUsername || 'Someone',
                 tripId,
                 destination !== 'their destination' ? destination : undefined
               ).catch((err) => {
@@ -632,7 +665,7 @@ export async function escalateTrip(
     // Check if already escalated to prevent duplicate notifications
     const { data: existingTrip } = await supabase
       .from('trips')
-      .select('status, escalation_notified, last_known_latitude, last_known_longitude, last_location_update_at')
+      .select('status, escalation_notified, last_known_latitude, last_known_longitude, last_location_update_at, missed_checkins_count')
       .eq('id', tripId)
       .single();
 
@@ -764,7 +797,8 @@ export async function escalateTrip(
                 userName,
                 userUsername || 'Someone',
                 tripId,
-                location
+                location,
+                trip?.missed_checkins_count // Pass missed_checkins_count to determine message
               ).catch((err) => {
                 console.error(`Error notifying Guardian ${tg.guardian_id}:`, err);
                 // Don't fail if one Guardian notification fails

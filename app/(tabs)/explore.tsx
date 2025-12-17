@@ -1,4 +1,5 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { radii } from '@/constants/design-tokens';
 import { useGuardian } from '@/hooks/use-guardian';
 import { useGuardianTrips } from '@/hooks/use-guardian-trips';
 import { useAuth } from '@/providers/auth-provider';
@@ -423,7 +424,7 @@ export default function SafeTogetherScreen() {
           <TouchableOpacity
             style={styles.addButton}
             onPress={() => handleSendRequest(item.id, item.username || 'user')}>
-            <IconSymbol name="person.badge.plus" size={16} color="#5170FF" />
+            <IconSymbol name="person.badge.plus" size={16} color="#FFFFFF" />
             <Text style={styles.addButtonText}>Add</Text>
           </TouchableOpacity>
         );
@@ -764,7 +765,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 12,
+    borderRadius: radii.full,
     backgroundColor: '#fff',
     alignItems: 'center',
     shadowColor: '#000',
@@ -1083,11 +1084,13 @@ const styles = StyleSheet.create({
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#5170FF',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: radii.full,
     gap: 6,
+    minWidth: 80,
   },
   addButtonText: {
     fontSize: 14,

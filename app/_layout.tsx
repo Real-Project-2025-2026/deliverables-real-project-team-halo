@@ -125,6 +125,9 @@ function NotificationHandler() {
       } else if (data?.type === 'guardian_trip_started' && data?.tripId) {
         // Navigate to Guardian Trip Detail Screen
         router.push(`/guardian-trip/${data.tripId}`);
+      } else if (data?.type === 'guardian_escalation' && data?.tripId) {
+        // Navigate to Guardian Escalation Screen
+        router.push(`/guardian-escalation/${data.tripId}`);
       }
     });
 
