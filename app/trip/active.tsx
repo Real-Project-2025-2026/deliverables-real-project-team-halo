@@ -38,8 +38,9 @@ import {
 } from '@/services/notification-service';
 import { logPanicEvent, triggerPanicAlarm } from '@/services/panic-service';
 import * as tripService from '@/services/trip-service';
-import { DUMMY_TRIP_GUARDIANS, type TripGuardian } from '@/types/guardian-request';
+import { useTripGuardians } from '@/hooks/use-trip-guardians';
 import { calculateTotalDistance } from '@/utils/route-helpers';
+import { getDirections, type RouteCoordinate } from '@/services/directions-service';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const TIMER_SIZE = 160;
@@ -72,17 +73,18 @@ function formatDuration(totalSeconds: number): string {
  * Get timer state colors based on remaining time
  */
 function getTimerState(secondsRemaining: number | null, intervalMinutes: number) {
-  if (secondsRemaining === null) return { color: colors.primary[500], state: 'waiting' };
+  if (secondsRemaining === null) return { color: '#5170FF', state: 'waiting' };
   
   const totalSeconds = intervalMinutes * 60;
   const percentage = secondsRemaining / totalSeconds;
   
+  // Always use #5170FF for timer color
   if (percentage > 0.5) {
-    return { color: colors.success.main, state: 'safe' };
+    return { color: '#5170FF', state: 'safe' };
   } else if (percentage > 0.2) {
-    return { color: colors.warning.main, state: 'warning' };
+    return { color: '#5170FF', state: 'warning' };
   } else {
-    return { color: colors.error.main, state: 'urgent' };
+    return { color: '#5170FF', state: 'urgent' };
   }
 }
 
@@ -97,11 +99,18 @@ export default function ActiveTripScreen() {
   const [checkinModalVisible, setCheckinModalVisible] = useState(false);
   const [isEscalating, setIsEscalating] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
+  const [plannedRoute, setPlannedRoute] = useState<RouteCoordinate[]>([]);
   const isCompletingRef = useRef(false);
   const scrollViewRef = useRef<ScrollView>(null);
   
   // Trip Guardians (people watching over this trip)
-  const [tripGuardians] = useState<TripGuardian[]>(DUMMY_TRIP_GUARDIANS);
+  const {
+    guardians: tripGuardians,
+    isLoading: isLoadingGuardians,
+    acceptedCount,
+    pendingCount,
+    refresh: refreshGuardians,
+  } = useTripGuardians(activeTrip?.id ?? null);
   
   // Animation values
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -345,6 +354,75 @@ export default function ActiveTripScreen() {
     return () => clearInterval(interval);
   }, [activeTrip]);
 
+  // Calculate planned route between origin and destination
+  useEffect(() => {
+    if (
+      !activeTrip ||
+      !activeTrip.origin_latitude ||
+      !activeTrip.origin_longitude ||
+      !activeTrip.destination_latitude ||
+      !activeTrip.destination_longitude
+    ) {
+      setPlannedRoute([]);
+      return;
+    }
+
+    const calculateRoute = async () => {
+      try {
+        const { data, error } = await getDirections(
+          {
+            latitude: activeTrip.origin_latitude!,
+            longitude: activeTrip.origin_longitude!,
+          },
+          {
+            latitude: activeTrip.destination_latitude!,
+            longitude: activeTrip.destination_longitude!,
+          },
+          'driving' // or 'walking' based on trip mode
+        );
+
+        if (error || !data) {
+          console.warn('[ActiveTrip] Failed to calculate planned route:', error);
+          // Fallback: create a simple straight line
+          setPlannedRoute([
+            {
+              latitude: activeTrip.origin_latitude!,
+              longitude: activeTrip.origin_longitude!,
+            },
+            {
+              latitude: activeTrip.destination_latitude!,
+              longitude: activeTrip.destination_longitude!,
+            },
+          ]);
+          return;
+        }
+
+        setPlannedRoute(data.coordinates);
+      } catch (err) {
+        console.error('[ActiveTrip] Error calculating planned route:', err);
+        // Fallback: create a simple straight line
+        setPlannedRoute([
+          {
+            latitude: activeTrip.origin_latitude!,
+            longitude: activeTrip.origin_longitude!,
+          },
+          {
+            latitude: activeTrip.destination_latitude!,
+            longitude: activeTrip.destination_longitude!,
+          },
+        ]);
+      }
+    };
+
+    calculateRoute();
+  }, [
+    activeTrip?.id,
+    activeTrip?.origin_latitude,
+    activeTrip?.origin_longitude,
+    activeTrip?.destination_latitude,
+    activeTrip?.destination_longitude,
+  ]);
+
   // Refresh route on focus
   useFocusEffect(
     useCallback(() => {
@@ -536,7 +614,7 @@ export default function ActiveTripScreen() {
 
   // Calculate progress percentage for timer ring
   const progressPercentage = timeUntilNextCheckin !== null && activeTrip
-    ? 1 - (timeUntilNextCheckin / (activeTrip.checkin_interval_minutes * 60))
+    ? Math.max(0, Math.min(1, 1 - (timeUntilNextCheckin / (activeTrip.checkin_interval_minutes * 60))))
     : 0;
 
   return (
@@ -591,6 +669,7 @@ export default function ActiveTripScreen() {
               }))
             : []
         }
+        plannedRoute={plannedRoute}
       />
 
       {/* Floating Header */}
@@ -663,16 +742,40 @@ export default function ActiveTripScreen() {
             {/* Hero: Check-in Timer */}
             {!isEscalated && activeTrip.mode !== 'silent' && (
               <Animated.View style={[styles.timerContainer, { transform: [{ scale: pulseAnim }] }]}>
-                <View style={[styles.timerRing, { borderColor: colors.neutral[100] }]}>
-                  <View 
+                <View style={styles.timerRingContainer}>
+                  {/* Background ring */}
+                  <View style={[styles.timerRingBackground, { borderColor: colors.neutral[100] }]} />
+                  
+                  {/* Full progress ring - always visible */}
+                  <View
                     style={[
-                      styles.timerRingProgress, 
-                      { 
+                      styles.timerRingProgress,
+                      {
                         borderColor: timerState.color,
-                        opacity: progressPercentage > 0 ? 1 : 0,
-                      }
-                    ]} 
+                      },
+                    ]}
                   />
+                  {/* White overlay to cover the elapsed portion - rotates from top */}
+                  {timeUntilNextCheckin !== null && activeTrip && progressPercentage > 0 && (
+                    <View
+                      style={[
+                        styles.timerProgressOverlayContainer,
+                        {
+                          transform: [{ rotate: `${progressPercentage * 360 - 90}deg` }],
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.timerProgressOverlayHalf,
+                          {
+                            backgroundColor: colors.neutral[0],
+                          },
+                        ]}
+                      />
+                    </View>
+                  )}
+                  
                   <View style={styles.timerContent}>
                     <Text style={[styles.timerValue, { color: timerState.color }]}>
                       {timeUntilNextCheckin !== null ? formatTime(timeUntilNextCheckin) : '--:--'}
@@ -729,7 +832,7 @@ export default function ActiveTripScreen() {
                 ) : (
                   <>
                     <IconSymbol name="checkmark.circle.fill" size={22} color="#fff" />
-                    <Text style={styles.endTripButtonText}>Sicher angekommen</Text>
+                    <Text style={styles.endTripButtonText}>Arrived safely</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -769,7 +872,7 @@ export default function ActiveTripScreen() {
             <View style={styles.pageTitleContainer}>
               <Text style={styles.pageTitle}>Deine Guardians</Text>
               <Text style={styles.pageSubtitle}>
-                {tripGuardians.filter(g => g.status !== 'declined').length} Personen begleiten dich
+                {acceptedCount + pendingCount} {acceptedCount + pendingCount === 1 ? 'Person begleitet' : 'Personen begleiten'} dich
               </Text>
             </View>
 
@@ -950,7 +1053,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radii['3xl'],
     ...shadows.xl,
     paddingBottom: 0,
-    maxHeight: SCREEN_HEIGHT * 0.42,
+    maxHeight: SCREEN_HEIGHT * 0.58,
   },
   handleContainer: {
     alignItems: 'center',
@@ -1018,14 +1121,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: spacing.lg,
   },
-  timerRing: {
+  timerRingContainer: {
+    width: TIMER_SIZE,
+    height: TIMER_SIZE,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.neutral[0],
+    borderRadius: TIMER_SIZE / 2,
+  },
+  timerRingBackground: {
+    position: 'absolute',
     width: TIMER_SIZE,
     height: TIMER_SIZE,
     borderRadius: TIMER_SIZE / 2,
     borderWidth: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.neutral[0],
   },
   timerRingProgress: {
     position: 'absolute',
@@ -1033,9 +1142,21 @@ const styles = StyleSheet.create({
     height: TIMER_SIZE,
     borderRadius: TIMER_SIZE / 2,
     borderWidth: 8,
-    borderTopColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: 'transparent',
+  },
+  timerProgressOverlayContainer: {
+    position: 'absolute',
+    width: TIMER_SIZE,
+    height: TIMER_SIZE,
+    overflow: 'hidden',
+  },
+  timerProgressOverlayHalf: {
+    position: 'absolute',
+    top: -TIMER_SIZE / 2,
+    left: 0,
+    width: TIMER_SIZE,
+    height: TIMER_SIZE / 2,
+    borderTopLeftRadius: TIMER_SIZE / 2,
+    borderTopRightRadius: TIMER_SIZE / 2,
   },
   timerContent: {
     alignItems: 'center',
@@ -1145,6 +1266,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   helpButton: {
+    flex: 1.1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1162,16 +1284,16 @@ const styles = StyleSheet.create({
     color: colors.error.main,
   },
   endTripButton: {
-    flex: 1,
+    flex: 0.9,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.success.main,
+    backgroundColor: '#5170FF',
     paddingVertical: spacing.md,
     borderRadius: radii.full,
     gap: spacing.sm,
     ...shadows.md,
-    shadowColor: colors.success.main,
+    shadowColor: '#5170FF',
     shadowOpacity: 0.3,
   },
   endTripButtonFull: {

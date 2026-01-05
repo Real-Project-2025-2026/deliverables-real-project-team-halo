@@ -11,46 +11,6 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Track if categories are registered to avoid duplicate registrations
-let categoriesRegistered = false;
-
-/**
- * Register notification categories with actions
- * This must be called once when the app starts
- */
-export async function registerNotificationCategories(): Promise<void> {
-  // Avoid duplicate registrations
-  if (categoriesRegistered) {
-    return;
-  }
-
-  try {
-    // Register Check-in category with actions
-    await Notifications.setNotificationCategoryAsync('CHECKIN', [
-      {
-        identifier: 'CHECKIN_OK',
-        buttonTitle: "I'm OK",
-        options: {
-          opensAppToForeground: false, // Can stay in background
-        },
-      },
-      {
-        identifier: 'CHECKIN_HELP',
-        buttonTitle: 'Need Help',
-        options: {
-          opensAppToForeground: true, // Opens app for emergency
-        },
-      },
-    ]);
-
-    categoriesRegistered = true;
-    console.log('[Notification Service] Check-in category registered with actions');
-  } catch (error) {
-    console.error('[Notification Service] Error registering notification categories:', error);
-    throw error; // Re-throw to allow caller to handle
-  }
-}
-
 export interface NotificationServiceError {
   error: string;
   details?: unknown;
@@ -213,34 +173,23 @@ export async function sendCheckinNotification(checkinId: number): Promise<{
       return { error: permissionError };
     }
 
-    // Ensure categories are registered BEFORE sending notification
-    await registerNotificationCategories();
-
-    const notificationContent = {
-      title: "Are you okay?",
-      body: "Please confirm you're safe",
-      data: {
-        type: 'checkin',
-        checkinId,
-        actionRequired: true,
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Are you okay?",
+        body: "Please confirm you're safe",
+        data: {
+          type: 'checkin',
+          checkinId,
+          actionRequired: true,
+        },
+        sound: true,
+        priority: Notifications.AndroidNotificationPriority.HIGH,
       },
-      categoryIdentifier: 'CHECKIN', // Important: enables notification actions (note: categoryIdentifier, not categoryId!)
-      sound: true,
-      priority: Notifications.AndroidNotificationPriority.HIGH,
-    };
-
-    console.log('[Notification Service] Sending check-in notification with categoryIdentifier:', notificationContent.categoryIdentifier);
-
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: notificationContent,
       trigger: null, // Send immediately
     });
 
-    console.log('[Notification Service] Check-in notification sent with ID:', notificationId);
-
     return { error: null };
   } catch (err) {
-    console.error('[Notification Service] Error sending check-in notification:', err);
     return {
       error: { error: 'Failed to send check-in notification', details: err },
     };
@@ -639,71 +588,6 @@ export async function sendGuardianEscalationNotification(
   } catch (err) {
     return {
       error: { error: 'Failed to send Guardian escalation notification', details: err },
-    };
-  }
-}
-
-/**
- * Send a Guardian panic button notification
- * Notifies Guardians when someone they're guarding has pressed the panic button
- */
-export async function sendGuardianPanicNotification(
-  guardianPushToken: string,
-  userName: string,
-  userUsername: string,
-  location?: { latitude: number; longitude: number }
-): Promise<{ error: NotificationServiceError | null }> {
-  try {
-    if (!guardianPushToken) {
-      return { error: { error: 'No push token available for Guardian' } };
-    }
-
-    let body = `🚨 EMERGENCY: ${userName || userUsername} has pressed the PANIC BUTTON and may need immediate help.`;
-    
-    if (location) {
-      const locationUrl = `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
-      body += ` Last known location: ${locationUrl}`;
-    }
-
-    const message = {
-      to: guardianPushToken,
-      sound: 'default',
-      title: '🚨 Guardian Emergency Alert',
-      body,
-      data: {
-        type: 'guardian_panic',
-        location,
-        actionRequired: true,
-      },
-      priority: 'high',
-      channelId: Platform.OS === 'android' ? 'emergency' : undefined,
-    };
-
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    });
-
-    const result = await response.json();
-
-    if (result.errors && result.errors.length > 0) {
-      return {
-        error: {
-          error: 'Failed to send Guardian panic notification',
-          details: result.errors,
-        },
-      };
-    }
-
-    return { error: null };
-  } catch (err) {
-    return {
-      error: { error: 'Failed to send Guardian panic notification', details: err },
     };
   }
 }

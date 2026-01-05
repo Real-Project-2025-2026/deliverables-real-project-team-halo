@@ -11,12 +11,12 @@ import {
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { colors, radii, shadows, spacing, typography } from '@/constants/design-tokens';
-import { GuardianRequest } from '@/types/guardian-request';
+import type { TripGuardianWithDetails } from '@/services/trip-guardian-service';
 
 interface GuardianRequestCardProps {
-  request: GuardianRequest;
-  onAccept: (requestId: string) => Promise<void>;
-  onDecline: (requestId: string) => Promise<void>;
+  request: TripGuardianWithDetails;
+  onAccept: (requestId: number) => Promise<boolean>;
+  onDecline: (requestId: number) => Promise<boolean>;
 }
 
 /**
@@ -35,8 +35,10 @@ export function GuardianRequestCard({
     setIsAccepting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      await onAccept(request.id);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const success = await onAccept(request.id);
+      if (success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
     } catch (error) {
       console.error('Error accepting guardian request:', error);
     } finally {
@@ -57,31 +59,18 @@ export function GuardianRequestCard({
     }
   };
 
-  const getTimeAgo = (dateString: string) => {
-    const now = Date.now();
-    const then = new Date(dateString).getTime();
-    const diffMinutes = Math.floor((now - then) / 60000);
-    
-    if (diffMinutes < 1) return 'Gerade eben';
-    if (diffMinutes < 60) return `Vor ${diffMinutes} Min.`;
-    
-    const diffHours = Math.floor(diffMinutes / 60);
-    if (diffHours < 24) return `Vor ${diffHours} Std.`;
-    
-    const diffDays = Math.floor(diffHours / 24);
-    return `Vor ${diffDays} Tag${diffDays > 1 ? 'en' : ''}`;
-  };
-
-  const requesterName = request.requester?.full_name || request.requester?.username || 'Jemand';
+  // Trip owner is the person who wants you as their guardian
+  const tripOwner = request.trip_owner;
+  const requesterName = tripOwner?.full_name || tripOwner?.username || 'Jemand';
   const destination = request.trip?.destination_address?.split(',')[0] || 'Unbekanntes Ziel';
 
   return (
     <View style={styles.container}>
-      {/* Requester Info */}
+      {/* Trip Owner Info */}
       <View style={styles.requesterContainer}>
         <View style={styles.avatar}>
-          {request.requester?.avatar_url ? (
-            <Image source={{ uri: request.requester.avatar_url }} style={styles.avatarImage} />
+          {tripOwner?.avatar_url ? (
+            <Image source={{ uri: tripOwner.avatar_url }} style={styles.avatarImage} />
           ) : (
             <Text style={styles.avatarText}>
               {requesterName.charAt(0).toUpperCase()}

@@ -1,68 +1,107 @@
-import { View, Text, StyleSheet, ActivityIndicator, FlatList, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, FlatList, TouchableOpacity, Alert, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/providers/auth-provider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Image } from 'expo-image';
-import { useCallback } from 'react';
-
-// Dummy data for testing UI/UX
-const DUMMY_GUARDIAN_TRIPS = [
-  {
-    id: 1,
-    user: {
-      id: 'user-1',
-      username: 'harris_whitaker',
-      full_name: 'Harris Whitaker',
-      avatar_url: 'https://i.pravatar.cc/150?img=12',
-    },
-    origin_address: 'Norra Nynäshamn, Stockholms län',
-    destination_address: 'Stockholm Central Station',
-    status: 'active',
-    started_at: '2024-12-15T15:27:00Z',
-    last_checkin_at: '2024-12-15T15:45:00Z',
-    distance_km: 52.6,
-    checkin_interval_minutes: 5,
-    next_checkin_in_minutes: 2,
-  },
-  {
-    id: 2,
-    user: {
-      id: 'user-2',
-      username: 'emma_wilson',
-      full_name: 'Emma Wilson',
-      avatar_url: 'https://i.pravatar.cc/150?img=45',
-    },
-    origin_address: 'Florence, Tuscany, Italy',
-    destination_address: 'Stockholm Arlanda Airport',
-    status: 'active',
-    started_at: '2024-12-15T14:00:00Z',
-    last_checkin_at: '2024-12-15T15:30:00Z',
-    distance_km: 2340,
-    checkin_interval_minutes: 10,
-    next_checkin_in_minutes: 7,
-  },
-  {
-    id: 3,
-    user: {
-      id: 'user-3',
-      username: 'josh_wiggins',
-      full_name: 'Josh Wiggins',
-      avatar_url: 'https://i.pravatar.cc/150?img=33',
-    },
-    origin_address: 'Dresden, Saxony, Germany',
-    destination_address: 'Stockholm, Sweden',
-    status: 'escalated',
-    started_at: '2024-12-15T13:00:00Z',
-    last_checkin_at: '2024-12-15T14:15:00Z',
-    distance_km: 890,
-    checkin_interval_minutes: 5,
-    missed_checkins: 3,
-  },
-];
+import { useCallback, useEffect, useState } from 'react';
+import * as Haptics from 'expo-haptics';
+import {
+  getTripsAsGuardian,
+  acceptTripGuardianRequest,
+  declineTripGuardianRequest,
+  type TripGuardianWithDetails,
+} from '@/services/trip-guardian-service';
 
 export default function GuardianTripsScreen() {
   const { user, profile } = useAuth();
+  const [trips, setTrips] = useState<TripGuardianWithDetails[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Fetch trips where user is a guardian
+  const fetchTrips = useCallback(async () => {
+    try {
+      const { data, error } = await getTripsAsGuardian();
+      if (error) {
+        console.error('[GuardianTrips] Error fetching trips:', error);
+        return;
+      }
+      setTrips(data || []);
+    } catch (err) {
+      console.error('[GuardianTrips] Error:', err);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchTrips();
+  }, [fetchTrips]);
+
+  // Refresh on focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchTrips();
+    }, [fetchTrips])
+  );
+
+  // Pull to refresh
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await fetchTrips();
+  }, [fetchTrips]);
+
+  // Accept trip guardian request
+  const handleAccept = useCallback(async (tripGuardianId: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    
+    const { error } = await acceptTripGuardianRequest(tripGuardianId);
+    
+    if (error) {
+      Alert.alert('Fehler', error.error);
+      return;
+    }
+    
+    // Update local state
+    setTrips(prev => prev.map(t => 
+      t.id === tripGuardianId 
+        ? { ...t, status: 'accepted' as const, responded_at: new Date().toISOString() }
+        : t
+    ));
+    
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }, []);
+
+  // Decline trip guardian request
+  const handleDecline = useCallback(async (tripGuardianId: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    Alert.alert(
+      'Anfrage ablehnen?',
+      'Du wirst diesen Trip nicht mehr sehen.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Ablehnen',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await declineTripGuardianRequest(tripGuardianId);
+            
+            if (error) {
+              Alert.alert('Fehler', error.error);
+              return;
+            }
+            
+            // Remove from local state
+            setTrips(prev => prev.filter(t => t.id !== tripGuardianId));
+          },
+        },
+      ]
+    );
+  }, []);
 
   // Render user avatar (for header)
   const renderUserAvatar = useCallback(() => {
@@ -87,33 +126,41 @@ export default function GuardianTripsScreen() {
     );
   }, [profile, user]);
 
-  // TODO: Replace with real data loading
-  const isLoading = false;
-  const guardianTrips = DUMMY_GUARDIAN_TRIPS;
-
-  const formatTime = (isoString: string) => {
+  const formatTime = (isoString: string | null) => {
+    if (!isoString) return '';
     const date = new Date(isoString);
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const getStatusBadge = (trip: typeof DUMMY_GUARDIAN_TRIPS[0]) => {
-    if (trip.status === 'escalated') {
-      return { label: '🚨 EMERGENCY', color: '#FF3B30', textColor: '#fff' };
+  const getStatusBadge = (item: TripGuardianWithDetails) => {
+    if (item.trip?.status === 'escalated') {
+      return { label: '🚨 NOTFALL', color: '#FF3B30', textColor: '#fff' };
     }
-    return { label: 'IN TRANSIT', color: '#B4FF39', textColor: '#000' };
+    if (item.status === 'requested') {
+      return { label: 'ANFRAGE', color: '#FF9500', textColor: '#fff' };
+    }
+    return { label: 'UNTERWEGS', color: '#B4FF39', textColor: '#000' };
   };
 
-  const renderTripCard = useCallback(({ item }: { item: typeof DUMMY_GUARDIAN_TRIPS[0] }) => {
+  const renderTripCard = useCallback(({ item }: { item: TripGuardianWithDetails }) => {
     const statusBadge = getStatusBadge(item);
+    const tripOwner = item.trip_owner;
+    const trip = item.trip;
+    const isRequest = item.status === 'requested';
     
     return (
       <TouchableOpacity
         style={[
           styles.tripCard,
-          item.status === 'escalated' && styles.tripCardEscalated,
+          trip?.status === 'escalated' && styles.tripCardEscalated,
+          isRequest && styles.tripCardRequest,
         ]}
-        onPress={() => router.push(`/guardian-trip/${item.id}`)}
-        activeOpacity={0.7}>
+        onPress={() => {
+          if (!isRequest) {
+            router.push(`/guardian-trip/${trip?.id}`);
+          }
+        }}
+        activeOpacity={isRequest ? 1 : 0.7}>
         {/* Header with Status Badge */}
         <View style={styles.tripCardHeader}>
           <View style={[styles.statusBadge, { backgroundColor: statusBadge.color }]}>
@@ -121,7 +168,9 @@ export default function GuardianTripsScreen() {
               {statusBadge.label}
             </Text>
           </View>
-          <IconSymbol name="chevron.right" size={20} color="#999" />
+          {!isRequest && (
+            <IconSymbol name="chevron.right" size={20} color="#999" />
+          )}
         </View>
 
         {/* Route Info */}
@@ -131,7 +180,7 @@ export default function GuardianTripsScreen() {
               <View style={styles.originDot} />
             </View>
             <Text style={styles.routeText} numberOfLines={1}>
-              {item.origin_address}
+              {trip?.origin_address || 'Unbekannter Start'}
             </Text>
           </View>
           <View style={styles.routeLine} />
@@ -140,7 +189,7 @@ export default function GuardianTripsScreen() {
               <IconSymbol name="flag.fill" size={16} color="#FF3B30" />
             </View>
             <Text style={styles.routeText} numberOfLines={1}>
-              {item.destination_address}
+              {trip?.destination_address || 'Unbekanntes Ziel'}
             </Text>
           </View>
         </View>
@@ -148,40 +197,56 @@ export default function GuardianTripsScreen() {
         {/* User Info & Details */}
         <View style={styles.tripCardFooter}>
           <View style={styles.userInfo}>
-            <Image
-              source={{ uri: item.user.avatar_url }}
-              style={styles.tripUserAvatar}
-              contentFit="cover"
-            />
+            {tripOwner?.avatar_url ? (
+              <Image
+                source={{ uri: tripOwner.avatar_url }}
+                style={styles.tripUserAvatar}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={styles.tripUserAvatarPlaceholder}>
+                <Text style={styles.tripUserAvatarText}>
+                  {(tripOwner?.full_name || tripOwner?.username || '?')[0].toUpperCase()}
+                </Text>
+              </View>
+            )}
             <View style={styles.userDetails}>
-              <Text style={styles.userName}>{item.user.full_name}</Text>
+              <Text style={styles.userName}>
+                {tripOwner?.full_name || tripOwner?.username || 'Unbekannt'}
+              </Text>
               <Text style={styles.tripMeta}>
-                Started {formatTime(item.started_at)} · {item.distance_km} km
+                {trip?.started_at ? `Gestartet ${formatTime(trip.started_at)}` : 'Trip aktiv'}
+                {trip?.checkin_interval_minutes && ` · Check-in alle ${trip.checkin_interval_minutes} min`}
               </Text>
             </View>
           </View>
-          
-          {item.status !== 'escalated' && item.next_checkin_in_minutes !== undefined && (
-            <View style={styles.checkinTimer}>
-              <IconSymbol name="clock.fill" size={14} color="#5170FF" />
-              <Text style={styles.checkinTimerText}>
-                {item.next_checkin_in_minutes}m
-              </Text>
-            </View>
-          )}
-          
-          {item.status === 'escalated' && (
-            <View style={styles.emergencyBadge}>
-              <IconSymbol name="exclamationmark.triangle.fill" size={14} color="#fff" />
-              <Text style={styles.emergencyBadgeText}>
-                {item.missed_checkins} missed
-              </Text>
-            </View>
-          )}
         </View>
+
+        {/* Accept/Decline Buttons for Requests */}
+        {isRequest && (
+          <View style={styles.requestActions}>
+            <TouchableOpacity
+              style={styles.declineButton}
+              onPress={() => handleDecline(item.id)}
+              activeOpacity={0.8}>
+              <Text style={styles.declineButtonText}>Ablehnen</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.acceptButton}
+              onPress={() => handleAccept(item.id)}
+              activeOpacity={0.8}>
+              <IconSymbol name="checkmark" size={18} color="#fff" />
+              <Text style={styles.acceptButtonText}>Annehmen</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </TouchableOpacity>
     );
-  }, []);
+  }, [handleAccept, handleDecline]);
+
+  // Separate trips by status
+  const requestedTrips = trips.filter(t => t.status === 'requested');
+  const acceptedTrips = trips.filter(t => t.status === 'accepted');
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -199,23 +264,39 @@ export default function GuardianTripsScreen() {
 
       {isLoading ? (
         <View style={styles.centerContent}>
-          <ActivityIndicator size="large" color="#666" />
+          <ActivityIndicator size="large" color="#5170FF" />
         </View>
-      ) : guardianTrips.length === 0 ? (
+      ) : trips.length === 0 ? (
         <View style={styles.centerContent}>
           <IconSymbol name="shield.fill" size={64} color="#ccc" />
-          <Text style={styles.centerTitle}>No Active Trips</Text>
+          <Text style={styles.centerTitle}>Keine aktiven Trips</Text>
           <Text style={styles.centerSubtitle}>
-            When someone adds you as a Guardian and starts a trip, you'll see it here
+            Wenn jemand dich als Guardian hinzufügt und einen Trip startet, siehst du ihn hier
           </Text>
         </View>
       ) : (
         <FlatList
-          data={guardianTrips}
+          data={[...requestedTrips, ...acceptedTrips]}
           renderItem={renderTripCard}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor="#5170FF"
+            />
+          }
+          ListHeaderComponent={
+            requestedTrips.length > 0 ? (
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>
+                  Neue Anfragen ({requestedTrips.length})
+                </Text>
+              </View>
+            ) : null
+          }
         />
       )}
     </SafeAreaView>
@@ -290,8 +371,18 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 8,
     paddingBottom: 24,
+  },
+  sectionHeader: {
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   tripCard: {
     backgroundColor: '#fff',
@@ -306,6 +397,10 @@ const styles = StyleSheet.create({
   tripCardEscalated: {
     borderWidth: 2,
     borderColor: '#FF3B30',
+  },
+  tripCardRequest: {
+    borderWidth: 2,
+    borderColor: '#FF9500',
   },
   tripCardHeader: {
     flexDirection: 'row',
@@ -383,6 +478,19 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#5170FF',
   },
+  tripUserAvatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#5170FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tripUserAvatarText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
   userDetails: {
     flex: 1,
   },
@@ -396,31 +504,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
   },
-  checkinTimer: {
+  requestActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0F4FF',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    gap: 4,
+    gap: 12,
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
   },
-  checkinTimerText: {
-    fontSize: 13,
+  declineButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 9999,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  declineButtonText: {
+    fontSize: 15,
     fontWeight: '600',
-    color: '#5170FF',
+    color: '#666',
   },
-  emergencyBadge: {
+  acceptButton: {
+    flex: 1.5,
     flexDirection: 'row',
+    paddingVertical: 12,
+    borderRadius: 9999,
+    backgroundColor: '#5170FF',
     alignItems: 'center',
-    backgroundColor: '#FF3B30',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    gap: 4,
+    justifyContent: 'center',
+    gap: 6,
+    shadowColor: '#5170FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
-  emergencyBadgeText: {
-    fontSize: 13,
+  acceptButtonText: {
+    fontSize: 15,
     fontWeight: '600',
     color: '#fff',
   },

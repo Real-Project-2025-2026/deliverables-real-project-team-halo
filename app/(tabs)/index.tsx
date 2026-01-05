@@ -1,11 +1,13 @@
 import { GuardianRequestCard } from '@/components/guardian-request-card';
+import { GuardianEscalationCard } from '@/components/guardian-escalation-card';
 import { MapViewWrapper } from '@/components/map-view-wrapper';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useLocation } from '@/hooks/use-location';
 import { useTrip } from '@/hooks/use-trip';
 import { useGuardian } from '@/hooks/use-guardian';
+import { useTripGuardianRequests } from '@/hooks/use-trip-guardian-requests';
+import { useEscalatedGuardianTrips } from '@/hooks/use-escalated-guardian-trips';
 import { useAuth } from '@/providers/auth-provider';
-import { DUMMY_GUARDIAN_REQUESTS, type GuardianRequest } from '@/types/guardian-request';
 import type { GuardianLocation } from '@/services/guardian-service';
 import { getGuardiansWithLocations } from '@/services/guardian-service';
 import { searchAddresses, reverseGeocode, type GeocodedAddress } from '@/services/geocoding-service';
@@ -58,8 +60,21 @@ export default function HomeScreen() {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const [guardianLocations, setGuardianLocations] = useState<GuardianLocation[]>([]);
   
-  // Guardian Requests State (for when someone wants you as their guardian)
-  const [guardianRequests, setGuardianRequests] = useState<GuardianRequest[]>(DUMMY_GUARDIAN_REQUESTS);
+  // Trip Guardian Requests (for when someone wants you as their guardian for a trip)
+  const {
+    requests: guardianRequests,
+    isLoading: isLoadingRequests,
+    acceptRequest: acceptGuardianRequest,
+    declineRequest: declineGuardianRequest,
+    refresh: refreshRequests,
+  } = useTripGuardianRequests();
+  
+  // Escalated Guardian Trips (emergency alerts)
+  const {
+    escalatedTrips: escalatedGuardianTrips,
+    isLoading: isLoadingEscalated,
+    refresh: refreshEscalated,
+  } = useEscalatedGuardianTrips();
   
   // Bottom Sheet Tab State
   const [activeTab, setActiveTab] = useState<0 | 1 | 2>(0);
@@ -152,12 +167,16 @@ export default function HomeScreen() {
 
   // Auto-switch to relevant tab
   useEffect(() => {
-    if (guardianRequests.length > 0 && activeTab === 0) {
+    // Priority: Escalations > Guardian Requests > Active Trip
+    if (escalatedGuardianTrips.length > 0 && activeTab === 0) {
+      // Keep on Menü tab if there are escalations
+      return;
+    } else if (guardianRequests.length > 0 && activeTab === 0) {
       setActiveTab(2); // Switch to Guardian Requests tab if there are requests
-    } else if (activeTrip && activeTab === 0 && guardianRequests.length === 0) {
+    } else if (activeTrip && activeTab === 0 && guardianRequests.length === 0 && escalatedGuardianTrips.length === 0) {
       setActiveTab(1); // Switch to Trips tab if user has an active trip
     }
-  }, [guardianRequests.length, activeTrip, activeTab]);
+  }, [guardianRequests.length, activeTrip, activeTab, escalatedGuardianTrips.length]);
 
   // Request location on mount and start watching
   useEffect(() => {
@@ -437,28 +456,27 @@ export default function HomeScreen() {
   }, []);
 
   // Guardian Request Handlers
-  const handleAcceptGuardianRequest = useCallback(async (requestId: string) => {
-    // TODO: Implement actual API call
-    console.log('[Home] Accepting guardian request:', requestId);
+  const handleAcceptGuardianRequest = useCallback(async (requestId: number) => {
+    console.log('[Home] Accepting trip guardian request:', requestId);
     
-    // Update local state to remove the request
-    setGuardianRequests(prev => prev.filter(r => r.id !== requestId));
+    const success = await acceptGuardianRequest(requestId);
     
-    // Show success message
-    Alert.alert(
-      'Guardian-Anfrage angenommen',
-      'Du wirst benachrichtigt, wenn der Trip startet.',
-      [{ text: 'OK' }]
-    );
-  }, []);
+    if (success) {
+      Alert.alert(
+        '👀 Du passt auf!',
+        'Du begleitest nun diesen Trip als Guardian.',
+        [{ text: 'OK' }]
+      );
+    }
+    
+    return success;
+  }, [acceptGuardianRequest]);
 
-  const handleDeclineGuardianRequest = useCallback(async (requestId: string) => {
-    // TODO: Implement actual API call
-    console.log('[Home] Declining guardian request:', requestId);
+  const handleDeclineGuardianRequest = useCallback(async (requestId: number) => {
+    console.log('[Home] Declining trip guardian request:', requestId);
     
-    // Update local state to remove the request
-    setGuardianRequests(prev => prev.filter(r => r.id !== requestId));
-  }, []);
+    return await declineGuardianRequest(requestId);
+  }, [declineGuardianRequest]);
 
   const handleLocationButtonPress = useCallback(async () => {
     console.log('Location button pressed, requesting location...');
@@ -999,6 +1017,11 @@ export default function HomeScreen() {
               onPress={() => setActiveTab(0)}
               activeOpacity={0.7}
             >
+              {escalatedGuardianTrips.length > 0 && (
+                <View style={[styles.tabBadge, styles.tabBadgeEmergency]}>
+                  <Text style={styles.tabBadgeText}>{escalatedGuardianTrips.length}</Text>
+                </View>
+              )}
               <Text style={[styles.tabButtonText, activeTab === 0 && styles.tabButtonTextActive]}>
                 Menü
               </Text>
@@ -1036,10 +1059,32 @@ export default function HomeScreen() {
             contentContainerStyle={styles.contentContainer}
             showsVerticalScrollIndicator={false}>
             
-            {/* Tab 0: Menü (Placeholder) */}
+            {/* Tab 0: Menü (Escalations) */}
             {activeTab === 0 && (
               <View style={styles.tabContent}>
-                <Text style={styles.comingSoonText}>Menü-Inhalt kommt später</Text>
+                {escalatedGuardianTrips.length > 0 ? (
+                  <>
+                    <Text style={styles.sectionTitle}>Emergency Alerts</Text>
+                    {escalatedGuardianTrips.map((escalatedTrip) => (
+                      <GuardianEscalationCard
+                        key={escalatedTrip.id}
+                        userName={
+                          escalatedTrip.trip_owner?.full_name ||
+                          escalatedTrip.trip_owner?.username ||
+                          'Unknown User'
+                        }
+                        userAvatar={escalatedTrip.trip_owner?.avatar_url}
+                        destination={escalatedTrip.trip?.destination_address}
+                        missedCheckins={escalatedTrip.trip?.missed_checkins_count || 0}
+                        onPress={() => {
+                          router.push(`/guardian-escalation/${escalatedTrip.trip_id}`);
+                        }}
+                      />
+                    ))}
+                  </>
+                ) : (
+                  <Text style={styles.comingSoonText}>No active emergencies</Text>
+                )}
               </View>
             )}
 
@@ -1369,11 +1414,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 4,
     zIndex: 10,
+    zIndex: 10,
   },
   tabBadgeText: {
     fontSize: 10,
     fontWeight: '700',
     color: '#fff',
+  },
+  tabBadgeEmergency: {
+    backgroundColor: '#DC2626', // Darker red for emergency
+    borderWidth: 1,
+    borderColor: '#fff',
   },
   tabContent: {
     flex: 1,

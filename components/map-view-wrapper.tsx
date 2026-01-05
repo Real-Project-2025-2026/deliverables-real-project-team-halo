@@ -20,6 +20,7 @@ interface MapViewWrapperProps {
   origin?: { latitude: number; longitude: number };
   destination?: { latitude: number; longitude: number };
   routePoints?: Array<{ latitude: number; longitude: number }>;
+  plannedRoute?: Array<{ latitude: number; longitude: number }>;
   guardians?: GuardianMarker[];
   onLocationButtonPress?: () => void;
   onMapPress?: (event: any) => void;
@@ -32,6 +33,7 @@ export function MapViewWrapper({
   origin,
   destination,
   routePoints = [],
+  plannedRoute = [],
   guardians = [],
   onLocationButtonPress,
   onMapPress,
@@ -230,7 +232,35 @@ export function MapViewWrapper({
           }
         }}
         onPress={onMapPress}>
-        {/* Route Polyline with Shadow Effect */}
+        {/* Planned Route (between origin and destination) */}
+        {plannedRoute && plannedRoute.length > 1 && (
+          <>
+            {/* Shadow layer for planned route */}
+            <Polyline
+              coordinates={plannedRoute.map((point) => ({
+                latitude: point.latitude,
+                longitude: point.longitude,
+              }))}
+              strokeColor="rgba(81, 112, 255, 0.2)"
+              strokeWidth={12}
+              lineCap="round"
+              lineJoin="round"
+            />
+            {/* Main planned route line */}
+            <Polyline
+              coordinates={plannedRoute.map((point) => ({
+                latitude: point.latitude,
+                longitude: point.longitude,
+              }))}
+              strokeColor="#5170FF"
+              strokeWidth={6}
+              lineCap="round"
+              lineJoin="round"
+            />
+          </>
+        )}
+
+        {/* Actual Route (tracked route points) */}
         {routePoints && routePoints.length > 1 && (
           <>
             {/* Shadow layer */}
